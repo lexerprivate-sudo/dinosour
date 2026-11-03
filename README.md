@@ -135,18 +135,17 @@ and generates the thumbnail for you.
 JDK plus build-tools and platform 35, no Gradle. Install it with
 `adb install -r mobile/dinosour.apk`, or copy the file to the phone and open it.
 
-The app is a thin, full-screen client for the same site. It finds the computer on
-the local network automatically (UDP 41234). If broadcast is blocked, it shows a
-connect screen where you can type the `http://192.168...:3000` address printed in
-the server window. The phone and computer must be on the same Wi-Fi, and the
-server has to stay running.
+The APK is **fully standalone**. The whole site (`public/`) is bundled inside the
+APK and loaded from a private `https://dinosour.local` origin. The YouTube
+search, suggestions and metadata endpoints are answered in Java (`YouTubeApi`),
+so the app needs no server, no local network, no Cloudflare and no deployment.
+It works on Wi-Fi or mobile data in any country.
 
-Tap **Open cloud library** to skip the computer entirely and use the deployed
-copy at `https://dinosour.pages.dev`; the app remembers whichever server it
-connected to last.
-
-The phone layout is not the desktop layout squeezed down: it has full-bleed
-cards, side-by-side search results, a sticky player, and a five-tab bottom bar.
+The app opens straight to the feed. Local-only features (the bundled film
+library, history, likes and watch later) are hidden there, because those live on
+the computer; the app is YouTube search, home and playback. The phone layout is
+not the desktop layout squeezed down: it has full-bleed cards, side-by-side
+search results, a sticky player, and a compact bottom bar.
 
 The APK is signed with the local debug key in `mobile/debug.keystore`. That is
 fine for sideloading; do not publish it to a store.
@@ -155,9 +154,9 @@ fine for sideloading; do not publish it to a store.
 
 The app checks the latest GitHub release on launch (and when you come back to
 it) and downloads it in the background. When it is ready, one dialog installs
-it; the update replaces the old app and keeps your library and settings.
-Android asks once for permission to install from dinosour, and it always shows
-its own install confirmation for apps installed outside the Play Store.
+it; the update replaces the old app and keeps your settings. Android asks once
+for permission to install from dinosour, and it always shows its own install
+confirmation for apps installed outside the Play Store.
 
 Publish a release with:
 

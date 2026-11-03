@@ -22,7 +22,7 @@ import {
   shortCardHtml,
   verifiedIcon,
 } from './components.js';
-import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, timeAgo } from './util.js';
+import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, timeAgo, APP_MODE } from './util.js';
 import { navigate, openMenu, toast } from './ui.js';
 import { searchYouTube, videoInfo } from './yt.js';
 
@@ -42,11 +42,11 @@ function chipsHtml(active = 'All') {
 }
 
 export function renderHome({ category = 'All' } = {}) {
-  const pool = longVideos();
-  const list = category === 'All' ? pool : pool.filter((v) => v.category === category);
-  const shorts = shortVideos();
+  const pool = APP_MODE ? [] : longVideos();
+  const list = APP_MODE ? [] : category === 'All' ? pool : pool.filter((v) => v.category === category);
+  const shorts = APP_MODE ? [] : shortVideos();
 
-  if (!list.length) {
+  if (!APP_MODE && !list.length) {
     return `${chipsHtml(category)}${emptyState({
       iconName: 'film',
       title: 'Nothing here yet',
@@ -60,7 +60,7 @@ export function renderHome({ category = 'All' } = {}) {
   const tail = list.slice(8);
 
   return `${chipsHtml(category)}
-  <div class="grid">${head.map(cardHtml).join('')}</div>
+  ${head.length ? `<div class="grid">${head.map(cardHtml).join('')}</div>` : ''}
   ${category === 'All' && shorts.length ? shortsSection(shorts) : ''}
   ${tail.length ? `<div class="grid">${tail.map(cardHtml).join('')}</div>` : ''}
   <div class="grid" data-home-more-grid></div>
@@ -82,8 +82,19 @@ const FEED_SEEDS = {
   Nature: ['nature documentary', '4k nature', 'wildlife'],
 };
 
+const TRENDING_SEEDS = ['trending now', 'popular videos', 'viral videos', 'top music', 'new trailers'];
+
 /** Infinite home feed: the local library first, then live YouTube results. */
 export async function mountHome(root, category = 'All') {
+  return mountFeed(root, FEED_SEEDS[category] || FEED_SEEDS.All);
+}
+
+/** The app's Trending tab: an endless feed of popular YouTube results. */
+export async function mountTrending(root) {
+  return mountFeed(root, TRENDING_SEEDS);
+}
+
+async function mountFeed(root, seeds) {
   const grid = root.querySelector('[data-home-more-grid]');
   const loader = root.querySelector('[data-home-more]');
   const sentinel = root.querySelector('[data-home-sentinel]');
@@ -91,15 +102,13 @@ export async function mountHome(root, category = 'All') {
   const retry = root.querySelector('[data-home-retry]');
   if (!grid || !loader || !sentinel) return;
 
-  const seeds = FEED_SEEDS[category] || FEED_SEEDS.All;
   const seen = new Set();
   for (const card of root.querySelectorAll('.grid .card[data-id]')) seen.add(card.dataset.id);
 
-  let seedIndex = 0;
-  let continuation = null;
+  let cursor = 0;
+  const tokens = new Map();
   let busy = false;
   let failed = false;
-  let done = false;
   const alive = () => sentinel.isConnected;
 
   const paint = () => {
@@ -108,33 +117,30 @@ export async function mountHome(root, category = 'All') {
   };
 
   const load = async () => {
-    if (busy || done || !alive()) return;
+    if (busy || !alive()) return;
     busy = true;
     failed = false;
     paint();
 
     let added = 0;
+    let attempts = 0;
     try {
-      while (alive() && !added && !done) {
-        let data;
-        if (continuation) {
-          data = await searchYouTube('', { continuation });
-        } else if (seedIndex < seeds.length) {
-          data = await searchYouTube(seeds[seedIndex++]);
-        } else {
-          done = true;
-          break;
-        }
+      while (alive() && !added && attempts++ < 12) {
+        // Rotate through the seeds so the feed never turns into one topic.
+        const seed = seeds[cursor++ % seeds.length];
+        const token = tokens.get(seed) || '';
+        const data = token
+          ? await searchYouTube('', { continuation: token })
+          : await searchYouTube(seed);
         if (!alive()) return;
 
-        continuation = data.continuation || null;
+        tokens.set(seed, data.continuation || null);
         const fresh = (data.videos || []).filter((v) => v && v.id && !seen.has(v.id));
         for (const v of fresh) seen.add(v.id);
         if (fresh.length) {
           grid.insertAdjacentHTML('beforeend', fresh.map(ytCardHtml).join(''));
           added = fresh.length;
         }
-        if (!continuation && seedIndex >= seeds.length) done = true;
       }
     } catch {
       if (!alive()) return;
@@ -143,13 +149,13 @@ export async function mountHome(root, category = 'All') {
       busy = false;
       if (alive()) {
         paint();
-        maybeMore();
+        if (added) maybeMore();
       }
     }
   };
 
   const maybeMore = () => {
-    if (busy || done || failed || !sentinel.isConnected) return;
+    if (busy || failed || !sentinel.isConnected) return;
     if (sentinel.getBoundingClientRect().top < window.innerHeight + 900) load();
   };
 
@@ -566,14 +572,14 @@ export function renderResults(query) {
     return `<div class="results">${emptyState({
       iconName: 'search',
       title: 'Search',
-      text: 'Search YouTube or this site.',
+      text: APP_MODE ? 'Search YouTube.' : 'Search YouTube or this site.',
       actionHref: '/',
       actionText: 'Browse home',
     })}</div>`;
   }
 
-  const local = searchVideos(q);
-  const chans = searchChannels(q);
+  const local = APP_MODE ? [] : searchVideos(q);
+  const chans = APP_MODE ? [] : searchChannels(q);
 
   const chanStrip = chans.length
     ? `<div class="channel-strip">${chans
@@ -625,7 +631,7 @@ export async function mountResults(root, query) {
   const sentinel = root.querySelector('[data-yt-sentinel]');
   if (!list || !more || !status) return;
 
-  const localCount = searchVideos(query).length;
+  const localCount = APP_MODE ? 0 : searchVideos(query).length;
   let continuation = null;
   let loaded = 0;
   let busy = false;
@@ -831,7 +837,7 @@ export async function mountRemoteWatch(root, id) {
     if (!playerEl || playerEl.classList.contains('playing')) return;
     const frame = document.createElement('iframe');
     frame.className = 'yt-frame';
-    frame.src = `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&origin=${encodeURIComponent(location.origin)}`;
+    frame.src = `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white${APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`}`;
     frame.title = root.querySelector('[data-yt-title]')?.textContent || 'YouTube video';
     frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
     frame.allowFullscreen = true;
@@ -1047,6 +1053,20 @@ export function mountLibrary(root, kind) {
 /* ============================================================ trending */
 
 export function renderTrending() {
+  if (APP_MODE) {
+    return `<div class="page-head" style="padding:24px 24px 0;max-width:1400px;margin:0 auto">
+        <h1>${icon('flame')} Trending</h1>
+        <span class="spacer"></span>
+        <span class="page-count">Popular on YouTube</span>
+      </div>
+      <div class="grid" data-home-more-grid></div>
+      <div class="feed-loader" data-home-more hidden><span class="spinner"></span></div>
+      <div class="feed-end" data-home-end hidden>
+        <button type="button" class="btn-more" data-home-retry>Try again</button>
+      </div>
+      <div class="feed-sentinel" data-home-sentinel aria-hidden="true"></div>`;
+  }
+
   const list = [...longVideos(), ...shortVideos()].sort((a, b) => (b.views || 0) - (a.views || 0));
   return `<div class="page-head" style="padding:24px 24px 0;max-width:1400px;margin:0 auto">
       <h1>${icon('flame')} Trending</h1>

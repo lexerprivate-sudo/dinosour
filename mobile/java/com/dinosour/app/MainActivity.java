@@ -15,7 +15,6 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
@@ -26,7 +25,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -35,6 +33,7 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -42,31 +41,36 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+/**
+ * A fully standalone dinosour client: the site is bundled in assets and the
+ * YouTube API is proxied in Java, so no server or deployment is required.
+ */
 public class MainActivity extends Activity {
+  /* A stable made-up origin keeps localStorage and same-origin requests working. */
+  private static final String ORIGIN = "https://dinosour.local";
+  private static final String HOST = "dinosour.local";
+
   private static final String PREFS = "dinosour";
-  private static final String KEY_URL = "server_url";
-  private static final String CLOUD_URL = "https://dinosour.pages.dev";
   private static final String UPDATE_REPO = "lexerprivate-sudo/dinosour";
-  private static final String UPDATE_API = "https://api.github.com/repos/" + UPDATE_REPO + "/releases/latest";
+  private static final String UPDATE_API =
+      "https://api.github.com/repos/" + UPDATE_REPO + "/releases/latest";
   private static final long UPDATE_INTERVAL = 5 * 60 * 1000L;
   private static final String KEY_LAST_UPDATE = "last_update_check";
   private static final String KEY_PENDING_VERSION = "pending_version";
 
   private WebView web;
-  private View setup;
-  private TextView setupMsg;
-  private EditText urlInput;
-  private ProgressBar pageProgress;
-  private ProgressBar findProgress;
-  private Button connectBtn;
-  private Button findBtn;
-  private Button cloudBtn;
   private FrameLayout root;
+  private ProgressBar pageProgress;
+  private View offline;
+  private TextView offlineMsg;
+  private Button retryBtn;
 
-  private String currentBase = "";
   private boolean mainError = false;
   private View customView;
   private WebChromeClient.CustomViewCallback customViewCallback;
@@ -86,14 +90,10 @@ public class MainActivity extends Activity {
 
     root = findViewById(R.id.root);
     web = findViewById(R.id.web);
-    setup = findViewById(R.id.setup);
-    setupMsg = findViewById(R.id.setupMsg);
-    urlInput = findViewById(R.id.urlInput);
     pageProgress = findViewById(R.id.pageProgress);
-    findProgress = findViewById(R.id.findProgress);
-    connectBtn = findViewById(R.id.connectBtn);
-    findBtn = findViewById(R.id.findBtn);
-    cloudBtn = findViewById(R.id.cloudBtn);
+    offline = findViewById(R.id.offline);
+    offlineMsg = findViewById(R.id.offlineMsg);
+    retryBtn = findViewById(R.id.retryBtn);
 
     WebSettings settings = web.getSettings();
     settings.setJavaScriptEnabled(true);
@@ -109,7 +109,8 @@ public class MainActivity extends Activity {
     settings.setAllowFileAccess(false);
     settings.setAllowContentAccess(false);
     settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-    settings.setUserAgentString(settings.getUserAgentString() + " dinosourApp/1.0");
+    settings.setUserAgentString(settings.getUserAgentString() + " dinosourApp/2.0");
+
     CookieManager cookies = CookieManager.getInstance();
     cookies.setAcceptCookie(true);
     cookies.setAcceptThirdPartyCookies(web, true);
@@ -120,6 +121,17 @@ public class MainActivity extends Activity {
 
     web.setWebViewClient(new WebViewClient() {
       @Override
+      public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+        return intercept(request.getUrl());
+      }
+
+      @Override
+      @SuppressWarnings("deprecation")
+      public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+        return intercept(Uri.parse(url));
+      }
+
+      @Override
       public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
         mainError = false;
         pageProgress.setVisibility(View.VISIBLE);
@@ -128,14 +140,8 @@ public class MainActivity extends Activity {
       @Override
       public void onPageFinished(WebView view, String url) {
         pageProgress.setVisibility(View.GONE);
-        if (url != null && url.startsWith(currentBase)) {
-          if (mainError) {
-            showSetup(getString(R.string.unreachable));
-          } else {
-            hideSetup();
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, currentBase).apply();
-          }
-        }
+        if (mainError) showOffline();
+        else hideOffline();
       }
 
       @Override
@@ -145,11 +151,15 @@ public class MainActivity extends Activity {
 
       @Override
       public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
-        if (request.isForMainFrame() && response != null && response.getStatusCode() >= 500) mainError = true;
+        if (request.isForMainFrame() && response != null && response.getStatusCode() >= 500) {
+          mainError = true;
+        }
       }
 
       @Override
       public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+        // Subframes (the YouTube embed) must load in place.
+        if (!request.isForMainFrame()) return false;
         return handleUrl(request.getUrl());
       }
 
@@ -196,86 +206,148 @@ public class MainActivity extends Activity {
       }
     });
 
-    connectBtn.setOnClickListener(v -> connect(urlInput.getText().toString()));
-    urlInput.setOnEditorActionListener((v, actionId, event) -> {
-      connect(urlInput.getText().toString());
-      return true;
-    });
-    findBtn.setOnClickListener(v -> findAutomatically());
-    cloudBtn.setOnClickListener(v -> {
-      urlInput.setText(CLOUD_URL);
-      connect(CLOUD_URL);
+    retryBtn.setOnClickListener(v -> {
+      mainError = false;
+      hideOffline();
+      web.reload();
     });
 
-    SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-    String saved = prefs.getString(KEY_URL, null);
-    if (saved != null && !saved.isEmpty()) {
-      connect(saved);
-    } else {
-      showSetup(getString(R.string.connect_body));
-      findAutomatically();
+    web.loadUrl(ORIGIN + "/");
+  }
+
+  /* --------------------------------------------------- bundled site + API */
+
+  private WebResourceResponse intercept(Uri uri) {
+    if (uri == null) return null;
+    String host = uri.getHost();
+    if (host == null || !host.equalsIgnoreCase(HOST)) return null;
+
+    String path = uri.getPath() == null || uri.getPath().isEmpty() ? "/" : uri.getPath();
+    try {
+      if (path.startsWith("/api/")) return apiResponse(path, uri.getEncodedQuery());
+      return assetResponse(path);
+    } catch (Exception error) {
+      return textResponse("Something went wrong.", 500);
     }
   }
 
-  private String normalize(String raw) {
-    String value = raw == null ? "" : raw.trim();
-    if (value.isEmpty()) return "";
-    if (!value.startsWith("http://") && !value.startsWith("https://")) {
-      value = "http://" + value;
+  private WebResourceResponse apiResponse(String path, String query) {
+    String json;
+    int status = 200;
+    try {
+      if (path.equals("/api/search")) {
+        json = YouTubeApi.search(param(query, "q"), param(query, "continuation"));
+      } else if (path.equals("/api/suggest")) {
+        json = YouTubeApi.suggest(param(query, "q"));
+      } else if (path.equals("/api/video")) {
+        json = YouTubeApi.video(param(query, "id"));
+      } else {
+        json = "{\"error\":\"Not found\"}";
+        status = 404;
+      }
+    } catch (Exception error) {
+      json = "{\"error\":\"" + escape(error.getMessage()) + "\"}";
+      status = 502;
     }
-    while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
-    return value;
+    return jsonResponse(json, status);
   }
 
-  private void connect(String raw) {
-    String base = normalize(raw);
-    if (base.isEmpty()) {
-      setupMsg.setText(R.string.unreachable);
-      setup.setVisibility(View.VISIBLE);
-      return;
+  private WebResourceResponse assetResponse(String path) {
+    String name = path.startsWith("/") ? path.substring(1) : path;
+    name = Uri.decode(name);
+    if (name.isEmpty() || name.contains("..")) name = "index.html";
+
+    try {
+      InputStream in;
+      String mime;
+      if (name.contains(".")) {
+        in = getAssets().open("site/" + name);
+        mime = mimeFor(name);
+      } else {
+        // Client-side route such as /watch/yt/abc: serve the app shell.
+        in = getAssets().open("site/index.html");
+        mime = "text/html";
+      }
+      return response(mime, in, 200);
+    } catch (IOException missing) {
+      try {
+        return response("text/html", getAssets().open("site/index.html"), 200);
+      } catch (IOException fatal) {
+        return textResponse("The app files are missing. Reinstall dinosour.", 404);
+      }
     }
-    currentBase = base;
-    mainError = false;
-    hideSetup();
-    web.loadUrl(base + "/");
   }
 
-  private void findAutomatically() {
-    connectBtn.setEnabled(false);
-    findBtn.setEnabled(false);
-    findProgress.setVisibility(View.VISIBLE);
-    setupMsg.setText(R.string.searching);
-    io.execute(() -> {
-      final String found = ServerDiscovery.find();
-      ui.post(() -> {
-        connectBtn.setEnabled(true);
-        findBtn.setEnabled(true);
-        findProgress.setVisibility(View.GONE);
-        if (found != null) {
-          urlInput.setText(found);
-          setupMsg.setText(R.string.found);
-          connect(found);
-        } else {
-          setupMsg.setText(R.string.not_found);
-        }
-      });
-    });
+  private WebResourceResponse response(String mime, InputStream in, int status) {
+    Map<String, String> headers = new HashMap<>();
+    headers.put("Cache-Control", "no-cache");
+    headers.put("Content-Type", mime + "; charset=utf-8");
+    return new WebResourceResponse(mime, "UTF-8", status, "OK", headers, in);
   }
 
-  private void showSetup(String message) {
-    setupMsg.setText(message);
-    if (!currentBase.isEmpty() && urlInput.getText().toString().isEmpty()) {
-      urlInput.setText(currentBase);
-    }
-    if (!urlInput.getText().toString().isEmpty()) {
-      urlInput.setSelection(urlInput.getText().length());
-    }
-    setup.setVisibility(View.VISIBLE);
+  private WebResourceResponse jsonResponse(String json, int status) {
+    Map<String, String> headers = new HashMap<>();
+    headers.put("Cache-Control", "no-store");
+    headers.put("Content-Type", "application/json; charset=utf-8");
+    return new WebResourceResponse(
+        "application/json",
+        "UTF-8",
+        status,
+        status == 200 ? "OK" : "Error",
+        headers,
+        new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
+  }
+
+  private WebResourceResponse textResponse(String message, int status) {
+    Map<String, String> headers = new HashMap<>();
+    headers.put("Cache-Control", "no-store");
+    return new WebResourceResponse(
+        "text/plain",
+        "UTF-8",
+        status,
+        status == 200 ? "OK" : "Error",
+        headers,
+        new ByteArrayInputStream(message.getBytes(StandardCharsets.UTF_8)));
+  }
+
+  private static String param(String query, String key) {
+    if (query == null || query.isEmpty()) return "";
+    String value = Uri.parse(ORIGIN + "/?" + query).getQueryParameter(key);
+    return value == null ? "" : value;
+  }
+
+  private static String mimeFor(String name) {
+    String lower = name.toLowerCase();
+    if (lower.endsWith(".js") || lower.endsWith(".mjs")) return "application/javascript";
+    if (lower.endsWith(".css")) return "text/css";
+    if (lower.endsWith(".json")) return "application/json";
+    if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html";
+    if (lower.endsWith(".svg")) return "image/svg+xml";
+    if (lower.endsWith(".png")) return "image/png";
+    if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+    if (lower.endsWith(".webp")) return "image/webp";
+    if (lower.endsWith(".ico")) return "image/x-icon";
+    if (lower.endsWith(".woff2")) return "font/woff2";
+    if (lower.endsWith(".woff")) return "font/woff";
+    if (lower.endsWith(".txt")) return "text/plain";
+    return "application/octet-stream";
+  }
+
+  private static String escape(String value) {
+    if (value == null) return "Unknown error";
+    return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ");
+  }
+
+  /* ------------------------------------------------------------- offline */
+
+  private void showOffline() {
+    offlineMsg.setText(R.string.offline_body);
+    offline.setVisibility(View.VISIBLE);
     pageProgress.setVisibility(View.GONE);
   }
 
-  private void hideSetup() {
-    setup.setVisibility(View.GONE);
+  private void hideOffline() {
+    offline.setVisibility(View.GONE);
   }
 
   private boolean handleUrl(Uri uri) {
@@ -284,20 +356,21 @@ public class MainActivity extends Activity {
     if (!scheme.equals("http") && !scheme.equals("https")) return true;
 
     String host = uri.getHost() == null ? "" : uri.getHost();
-    String baseHost = Uri.parse(currentBase).getHost();
     String path = uri.getPath() == null ? "" : uri.getPath();
 
-    if (baseHost != null && host.equalsIgnoreCase(baseHost)) return false;
+    if (host.equalsIgnoreCase(HOST)) return false;
     if (host.endsWith("youtube.com") || host.endsWith("youtube-nocookie.com")) {
       if (path.startsWith("/embed/")) return false;
     }
     try {
       startActivity(new Intent(Intent.ACTION_VIEW, uri));
-    } catch (Exception ignored) {}
+    } catch (Exception ignored) {
+      /* no browser installed */
+    }
     return true;
   }
 
-  /* ------------------------------------------------------- updates */
+  /* ------------------------------------------------------------- updates */
 
   private void checkForUpdate() {
     final SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
@@ -378,7 +451,8 @@ public class MainActivity extends Activity {
   }
 
   private boolean canInstallUpdates() {
-    return Build.VERSION.SDK_INT < Build.VERSION_CODES.O || getPackageManager().canRequestPackageInstalls();
+    return Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+        || getPackageManager().canRequestPackageInstalls();
   }
 
   private void installUpdate() {
@@ -392,7 +466,9 @@ public class MainActivity extends Activity {
               startActivity(new Intent(
                   Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                   Uri.parse("package:" + getPackageName())));
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+              /* settings unavailable */
+            }
           })
           .setNegativeButton(android.R.string.cancel, (dialog, which) -> installRequested = false)
           .show();
@@ -455,6 +531,8 @@ public class MainActivity extends Activity {
       return 0;
     }
   }
+
+  /* ------------------------------------------------------- window chrome */
 
   @SuppressWarnings("deprecation")
   private void hideSystemUi() {

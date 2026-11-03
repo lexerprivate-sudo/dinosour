@@ -100,6 +100,10 @@ async function main() {
   console.log('• compiling resources');
   run(aapt2, ['compile', '--dir', path.join(MOBILE, 'res'), '-o', compiled]);
 
+  console.log('• bundling the site');
+  const assets = path.join(BUILD, 'assets');
+  await fs.cp(path.join(ROOT, 'public'), path.join(assets, 'site'), { recursive: true });
+
   const unsigned = path.join(BUILD, 'app-unsigned.apk');
   console.log('• linking manifest');
   run(aapt2, [
@@ -108,6 +112,7 @@ async function main() {
     '-I', androidJar,
     '--manifest', path.join(MOBILE, 'AndroidManifest.xml'),
     '-R', compiled,
+    '-A', assets,
     '--java', gen,
     '--min-sdk-version', '26',
     '--target-sdk-version', '35',

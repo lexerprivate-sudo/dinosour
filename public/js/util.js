@@ -127,3 +127,16 @@ export function isTypingTarget(el) {
   const tag = el.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 }
+
+/* True inside the Android app. The app bundles this site and answers /api/*
+   natively, so it hides the local film library and server-only features. */
+export const APP_MODE =
+  /dinosourApp/i.test(navigator.userAgent) ||
+  location.hostname === 'dinosour.local' ||
+  (() => {
+    try {
+      return localStorage.getItem('dinosour.appMode') === '1';
+    } catch {
+      return false;
+    }
+  })();

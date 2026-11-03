@@ -2,7 +2,7 @@
 
 import { categories, channelById, loadCatalog, relatedFor, searchChannels, searchVideos, videoById } from './data.js';
 import { store } from './store.js';
-import { $, $$, compact, debounce, esc, icon, prefersReducedMotion } from './util.js';
+import { $, $$, APP_MODE, compact, debounce, esc, icon, prefersReducedMotion } from './util.js';
 import { closeMenu, navigate, openMenu, toast } from './ui.js';
 import { attachStream, detachStream } from './stream.js';
 import { suggestYouTube } from './yt.js';
@@ -12,6 +12,7 @@ import {
   mountLibrary,
   mountRemoteWatch,
   mountResults,
+  mountTrending,
   mountWatch,
   renderChannel,
   renderHome,
@@ -70,6 +71,14 @@ function buildSidebar() {
     return `<a class="nav-item" href="${item.href}" data-link data-nav="${item.key}">${icon(item.icon)}<span>${item.label}</span></a>`;
   }).join('');
   $('#sidebarInner').innerHTML = html;
+}
+
+/* The standalone app has no local library, so drop those destinations. */
+function pruneAppNav() {
+  if (!APP_MODE) return;
+  $$('[data-nav="history"], [data-nav="watch-later"], [data-nav="liked"]').forEach((el) => el.remove());
+  const credit = document.querySelector('.sidebar-credit');
+  if (credit) credit.textContent = 'Powered by YouTube';
 }
 
 function setMini(mini) {
@@ -139,7 +148,7 @@ function showSuggestions() {
   if (!q) return hideSuggestions();
 
   suggestionToken += 1;
-  const localRows = localSuggestionRows(q);
+  const localRows = APP_MODE ? [] : localSuggestionRows(q);
   paintSuggestions(localRows);
   // paintSuggestions() hides and bumps the token when there are no rows yet.
   const token = suggestionToken;
@@ -461,13 +470,25 @@ function renderRoute() {
       searchClear.hidden = !q;
     }
   } else if (seg[0] === 'feed' && seg[1] && TITLES[seg[1]]) {
-    html = renderLibrary(seg[1]);
-    mount = () => {
-      mountLibrary(view, seg[1]);
-    };
-    title = TITLES[seg[1]];
+    if (APP_MODE) {
+      // The standalone app has no local film library; send these old links home.
+      html = renderHome({ category: 'All' });
+      mount = () => {
+        mountHome(view, 'All');
+      };
+      title = '';
+    } else {
+      html = renderLibrary(seg[1]);
+      mount = () => {
+        mountLibrary(view, seg[1]);
+      };
+      title = TITLES[seg[1]];
+    }
   } else if (seg[0] === 'feed' && seg[1] === 'trending') {
     html = renderTrending();
+    if (APP_MODE) mount = () => {
+      mountTrending(view);
+    };
     title = 'Trending';
   } else if (seg[0] === 'channel' && seg[1]) {
     const ch = channelById(seg[1]);
@@ -533,6 +554,7 @@ async function boot() {
 
   await loadCatalog();
   buildSidebar();
+  pruneAppNav();
   updateActiveNav([]);
   renderRoute();
 }
