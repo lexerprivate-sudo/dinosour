@@ -51,7 +51,7 @@ public class MainActivity extends Activity {
   private static final String CLOUD_URL = "https://dinosour.pages.dev";
   private static final String UPDATE_REPO = "lexerprivate-sudo/dinosour";
   private static final String UPDATE_API = "https://api.github.com/repos/" + UPDATE_REPO + "/releases/latest";
-  private static final long UPDATE_INTERVAL = 60 * 60 * 1000L;
+  private static final long UPDATE_INTERVAL = 5 * 60 * 1000L;
   private static final String KEY_LAST_UPDATE = "last_update_check";
   private static final String KEY_PENDING_VERSION = "pending_version";
 

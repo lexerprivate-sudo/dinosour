@@ -153,11 +153,11 @@ fine for sideloading; do not publish it to a store.
 
 ### Updates
 
-The app checks the latest GitHub release on launch and downloads it in the
-background. When it is ready, one dialog installs it; the update replaces the
-old app and keeps your library and settings. Android asks once for permission
-to install from dinosour, and it always shows its own install confirmation for
-apps installed outside the Play Store.
+The app checks the latest GitHub release on launch (and when you come back to
+it) and downloads it in the background. When it is ready, one dialog installs
+it; the update replaces the old app and keeps your library and settings.
+Android asks once for permission to install from dinosour, and it always shows
+its own install confirmation for apps installed outside the Play Store.
 
 Publish a release with:
 
