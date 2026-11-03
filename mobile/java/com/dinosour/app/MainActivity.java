@@ -51,8 +51,9 @@ public class MainActivity extends Activity {
   private static final String CLOUD_URL = "https://dinosour.pages.dev";
   private static final String UPDATE_REPO = "lexerprivate-sudo/dinosour";
   private static final String UPDATE_API = "https://api.github.com/repos/" + UPDATE_REPO + "/releases/latest";
-  private static final long UPDATE_INTERVAL = 6 * 60 * 60 * 1000L;
+  private static final long UPDATE_INTERVAL = 60 * 60 * 1000L;
   private static final String KEY_LAST_UPDATE = "last_update_check";
+  private static final String KEY_PENDING_VERSION = "pending_version";
 
   private WebView web;
   private View setup;
@@ -70,6 +71,7 @@ public class MainActivity extends Activity {
   private View customView;
   private WebChromeClient.CustomViewCallback customViewCallback;
   private File pendingUpdate;
+  private boolean installRequested;
 
   private final ExecutorService io = Executors.newSingleThreadExecutor();
   private final Handler ui = new Handler(Looper.getMainLooper());
@@ -320,79 +322,58 @@ public class MainActivity extends Activity {
           }
         }
         if (apkUrl.isEmpty()) return;
-        final String url = apkUrl;
-        ui.post(() -> promptUpdate(tag, url));
+
+        final File file = UpdateProvider.apkFile(this);
+        final String cached = prefs.getString(KEY_PENDING_VERSION, "");
+        if (!file.exists() || !file.isFile() || !tag.equals(cached)) {
+          if (!download(url, file)) return;
+        }
+        pendingUpdate = file;
+        prefs.edit().putString(KEY_PENDING_VERSION, tag).apply();
+        ui.post(() -> promptUpdate(tag));
       } catch (Exception ignored) {
         // Offline or rate limited; try again later.
       }
     });
   }
 
-  private void promptUpdate(final String version, final String url) {
+  private boolean download(String url, File file) {
+    HttpURLConnection conn = null;
+    try {
+      if (file.exists() && !file.delete()) return false;
+      conn = (HttpURLConnection) new URL(url).openConnection();
+      conn.setInstanceFollowRedirects(true);
+      conn.setConnectTimeout(10000);
+      conn.setReadTimeout(30000);
+      conn.setRequestProperty("User-Agent", "dinosour-app");
+      conn.setRequestProperty("Accept", "application/octet-stream");
+
+      try (InputStream in = conn.getInputStream();
+           FileOutputStream out = new FileOutputStream(file)) {
+        byte[] buffer = new byte[16384];
+        int n;
+        while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+      }
+      return true;
+    } catch (Exception error) {
+      if (file.exists()) file.delete();
+      return false;
+    } finally {
+      if (conn != null) conn.disconnect();
+    }
+  }
+
+  private void promptUpdate(final String version) {
     if (isFinishing()) return;
     new AlertDialog.Builder(this)
         .setTitle(R.string.update_title)
         .setMessage(getString(R.string.update_body, version))
-        .setPositiveButton(R.string.update_now, (dialog, which) -> downloadUpdate(url))
-        .setNegativeButton(R.string.update_later, null)
-        .show();
-  }
-
-  private void downloadUpdate(final String url) {
-    final AlertDialog progress = new AlertDialog.Builder(this)
-        .setTitle(R.string.update_downloading)
-        .setMessage("0%")
-        .setCancelable(false)
-        .show();
-
-    io.execute(() -> {
-      File file = UpdateProvider.apkFile(this);
-      HttpURLConnection conn = null;
-      try {
-        if (file.exists() && !file.delete()) throw new IOException("Cannot replace cached update");
-        conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setInstanceFollowRedirects(true);
-        conn.setConnectTimeout(10000);
-        conn.setReadTimeout(30000);
-        conn.setRequestProperty("User-Agent", "dinosour-app");
-        conn.setRequestProperty("Accept", "application/octet-stream");
-
-        long total = conn.getContentLengthLong();
-        try (InputStream in = conn.getInputStream();
-             FileOutputStream out = new FileOutputStream(file)) {
-          byte[] buffer = new byte[16384];
-          long done = 0;
-          long last = 0;
-          int n;
-          while ((n = in.read(buffer)) != -1) {
-            out.write(buffer, 0, n);
-            done += n;
-            long now = System.currentTimeMillis();
-            if (now - last > 200) {
-              last = now;
-              final String label = total > 0
-                  ? Math.min(100, done * 100 / total) + "%"
-                  : (done / 1024) + " KB";
-              ui.post(() -> progress.setMessage(label));
-            }
-          }
-        }
-
-        pendingUpdate = file;
-        ui.post(() -> {
-          progress.dismiss();
+        .setPositiveButton(R.string.update_now, (dialog, which) -> {
+          installRequested = true;
           installUpdate();
-        });
-      } catch (Exception error) {
-        if (file.exists()) file.delete();
-        ui.post(() -> {
-          progress.dismiss();
-          Toast.makeText(this, R.string.update_failed, Toast.LENGTH_LONG).show();
-        });
-      } finally {
-        if (conn != null) conn.disconnect();
-      }
-    });
+        })
+        .setNegativeButton(R.string.update_later, (dialog, which) -> installRequested = false)
+        .show();
   }
 
   private boolean canInstallUpdates() {
@@ -412,7 +393,7 @@ public class MainActivity extends Activity {
                   Uri.parse("package:" + getPackageName())));
             } catch (Exception ignored) {}
           })
-          .setNegativeButton(android.R.string.cancel, null)
+          .setNegativeButton(android.R.string.cancel, (dialog, which) -> installRequested = false)
           .show();
       return;
     }
@@ -422,6 +403,7 @@ public class MainActivity extends Activity {
     intent.setDataAndType(apk, "application/vnd.android.package-archive");
     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
     pendingUpdate = null;
+    installRequested = false;
     try {
       startActivity(intent);
     } catch (Exception error) {
@@ -512,7 +494,7 @@ public class MainActivity extends Activity {
   protected void onResume() {
     super.onResume();
     if (web != null) web.onResume();
-    if (pendingUpdate != null && pendingUpdate.exists() && canInstallUpdates()) {
+    if (pendingUpdate != null && pendingUpdate.exists() && installRequested && canInstallUpdates()) {
       installUpdate();
     } else {
       checkForUpdate();
