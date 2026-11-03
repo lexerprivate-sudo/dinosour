@@ -1,0 +1,38 @@
+[build]
+  # HLS keeps every file under Pages/Netlify's per-file comfort zone.
+  # (Netlify CI needs media/ committed or built first; local deploys don't.)
+  command = "node tools/hls.mjs && node tools/pack.mjs --hls"
+  publish = "dist"
+
+# The app uses the History API, so every unknown path must return index.html.
+# Real files always win over this rewrite, so /media and /thumbs are unaffected.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/media/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+    Accept-Ranges = "bytes"
+
+[[headers]]
+  for = "/thumbs/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[headers]]
+  for = "/css/*"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/js/*"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/data/*"
+  [headers.values]
+    Cache-Control = "no-cache"

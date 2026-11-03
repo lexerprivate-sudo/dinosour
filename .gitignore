@@ -1,0 +1,22 @@
+node_modules/
+dist/
+
+# Original downloads and generated media: large, and reproducible via npm run fetch
+raw/
+media/
+thumbs/
+data/media-report.json
+data/sources.json
+
+# Netlify
+.netlify/
+
+# Cloudflare
+.wrangler/
+data/r2-state.json
+
+# Android build output and the local signing key
+mobile/build/
+mobile/dinosour.apk
+mobile/*.apk.idsig
+mobile/debug.keystore

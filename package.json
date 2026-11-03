@@ -1,0 +1,28 @@
+{
+  "name": "dinosour",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Search YouTube and watch without an account.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js --open",
+    "serve": "node server.js",
+    "preview": "node -e \"process.env.DINOSOUR_PREVIEW='dist'; import('./server.js')\"",
+    "fetch": "node tools/download.mjs",
+    "build": "node tools/finalize.mjs && node tools/patch-catalog.mjs",
+    "pack": "node tools/pack.mjs",
+    "deploy": "node tools/hls.mjs && node tools/pack.mjs --hls && netlify deploy --prod --dir=dist",
+    "hls": "node tools/hls.mjs",
+    "login": "wrangler login",
+    "cloud": "node tools/pages.mjs",
+    "cloud:r2": "node tools/cloudflare.mjs",
+    "mobile": "node tools/android.mjs",
+    "release": "node tools/release.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "wrangler": "^4.156.0"
+  }
+}

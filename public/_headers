@@ -1,0 +1,31 @@
+# Cloudflare Pages / Netlify headers.
+#
+# The recommended deploy is HLS on Pages: playlists must stay fresh, segments
+# can be cached. The generic /media rule covers the optional MP4-on-R2 setup and
+# local previews.
+
+/media/*
+  Cache-Control: public, max-age=604800
+  Accept-Ranges: bytes
+
+/media/hls/*
+  Cache-Control: public, max-age=86400
+  Accept-Ranges: bytes
+
+/media/hls/*/*.m3u8
+  Cache-Control: no-cache
+
+/thumbs/*
+  Cache-Control: public, max-age=86400
+
+/css/*
+  Cache-Control: no-cache
+
+/js/*
+  Cache-Control: no-cache
+
+/data/*
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
