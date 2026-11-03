@@ -77,6 +77,9 @@ function buildSidebar() {
 function pruneAppNav() {
   if (!APP_MODE) return;
   $$('[data-nav="history"], [data-nav="watch-later"], [data-nav="liked"]').forEach((el) => el.remove());
+  $$('#sidebarInner .nav-divider').forEach((el) => {
+    if (!el.nextElementSibling) el.remove();
+  });
   const credit = document.querySelector('.sidebar-credit');
   if (credit) credit.textContent = 'Powered by YouTube';
 }
