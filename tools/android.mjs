@@ -100,10 +100,6 @@ async function main() {
   console.log('• compiling resources');
   run(aapt2, ['compile', '--dir', path.join(MOBILE, 'res'), '-o', compiled]);
 
-  console.log('• bundling the site');
-  const assets = path.join(BUILD, 'assets');
-  await fs.cp(path.join(ROOT, 'public'), path.join(assets, 'site'), { recursive: true });
-
   const unsigned = path.join(BUILD, 'app-unsigned.apk');
   console.log('• linking manifest');
   run(aapt2, [
@@ -112,7 +108,6 @@ async function main() {
     '-I', androidJar,
     '--manifest', path.join(MOBILE, 'AndroidManifest.xml'),
     '-R', compiled,
-    '-A', assets,
     '--java', gen,
     '--min-sdk-version', '26',
     '--target-sdk-version', '35',
@@ -139,10 +134,20 @@ async function main() {
   run('java', ['-cp', d8Jar, 'com.android.tools.r8.D8', '--release', '--lib', androidJar, '--min-api', '26', '--output', dex, ...classFiles]);
 
   console.log('• packaging');
+  // Add the site files ourselves: aapt2 -A writes Windows backslashes on Windows,
+  // and AssetManager only understands forward-slash asset paths.
+  const siteDir = path.join(ROOT, 'public');
+  const siteFiles = await listFiles(siteDir, () => true);
+  const addSite = siteFiles.map((file) => {
+    const rel = path.relative(siteDir, file).split(path.sep).join('/');
+    const entry = `assets/site/${rel}`;
+    return `[void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, '${file.replace(/'/g, "''")}', '${entry.replace(/'/g, "''")}', [System.IO.Compression.CompressionLevel]::Optimal)`;
+  });
   const zipScript = [
     'Add-Type -AssemblyName System.IO.Compression.FileSystem',
     `$zip = [System.IO.Compression.ZipFile]::Open('${unsigned.replace(/'/g, "''")}', 'Update')`,
     `[void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, '${path.join(dex, 'classes.dex').replace(/'/g, "''")}', 'classes.dex', [System.IO.Compression.CompressionLevel]::Optimal)`,
+    ...addSite,
     '$zip.Dispose()',
   ].join('; ');
   execFileSync('powershell.exe', ['-NoProfile', '-Command', zipScript], { stdio: 'inherit' });
