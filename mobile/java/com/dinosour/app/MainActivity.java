@@ -323,6 +323,7 @@ public class MainActivity extends Activity {
         }
         if (apkUrl.isEmpty()) return;
 
+        final String url = apkUrl;
         final File file = UpdateProvider.apkFile(this);
         final String cached = prefs.getString(KEY_PENDING_VERSION, "");
         if (!file.exists() || !file.isFile() || !tag.equals(cached)) {
