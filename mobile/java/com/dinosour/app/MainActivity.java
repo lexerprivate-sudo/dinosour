@@ -595,7 +595,7 @@ public class MainActivity extends Activity {
   }
 
   /** Small API exposed to the bundled site as window.Dinosour. */
-  private class Bridge {
+  public class Bridge {
     @JavascriptInterface
     public String appVersion() {
       return currentVersion();
