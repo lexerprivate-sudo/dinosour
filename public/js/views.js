@@ -839,11 +839,33 @@ function remoteMeta(info) {
   return [info.viewsText, published].filter(Boolean).join(' · ');
 }
 
+const YT_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const YT_QUALITIES = [
+  ['auto', 'Auto'],
+  ['hd1080', '1080p'],
+  ['hd720', '720p'],
+  ['large', '480p'],
+  ['medium', '360p'],
+];
+const YT_QUALITY_NAMES = {
+  highres: '4K',
+  hd2160: '4K',
+  hd1440: '1440p',
+  hd1080: '1080p',
+  hd720: '720p',
+  large: '480p',
+  medium: '360p',
+  small: '240p',
+  tiny: '144p',
+};
+
 export function renderRemoteWatch(id, info = null) {
   const title = info?.title || 'YouTube video';
   const meta = remoteMeta(info);
   const saved = store.resumeFor(id);
   const pct = saved ? Math.min(100, Math.max(1, (saved.t / saved.d) * 100)) : 0;
+  const rate = YT_RATES.includes(Number(store.state.ytRate)) ? Number(store.state.ytRate) : 1;
+  const quality = YT_QUALITIES.find(([value]) => value === store.state.ytQuality)?.[1] || 'Auto';
 
   return `<div class="watch yt-watch">
     <div class="watch-main">
@@ -868,6 +890,8 @@ export function renderRemoteWatch(id, info = null) {
       <div class="watch-meta-row">
         <div class="watch-views" data-yt-meta>${esc(meta || 'Loading…')}</div>
         <div class="watch-actions">
+          <button class="action-btn" type="button" data-yt-rate title="Playback speed">${icon('gauge')} <span data-yt-rate-label>${rate}×</span></button>
+          <button class="action-btn" type="button" data-yt-quality title="Video quality">${icon('hd')} <span data-yt-quality-label>${esc(quality)}</span></button>
           <a class="action-btn" href="https://www.youtube.com/watch?v=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">${icon('play')} Open on YouTube</a>
           <button class="action-btn" data-copy-remote>${icon('share')} Copy link</button>
         </div>
@@ -897,10 +921,30 @@ export function mountRemoteWatch(root, id) {
     thumb: saved?.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(id)}/mqdefault.jpg`,
   };
 
+  const rateBtn = root.querySelector('[data-yt-rate]');
+  const qualityBtn = root.querySelector('[data-yt-quality]');
+
+  const currentRate = () => {
+    const value = Number(store.state.ytRate);
+    return YT_RATES.includes(value) ? value : 1;
+  };
+  const currentQuality = () =>
+    YT_QUALITIES.some(([value]) => value === store.state.ytQuality) ? store.state.ytQuality : 'auto';
+
+  const paintPrefs = () => {
+    const rateLabel = root.querySelector('[data-yt-rate-label]');
+    if (rateLabel) rateLabel.textContent = `${currentRate()}×`;
+    const qualityLabel = root.querySelector('[data-yt-quality-label]');
+    if (qualityLabel) {
+      qualityLabel.textContent = YT_QUALITIES.find(([value]) => value === currentQuality())[1];
+    }
+  };
+
   let frame = null;
   let duration = saved?.d || 0;
   let position = saved?.t || 0;
   let startAt = saved?.t || 0;
+  let actualQuality = '';
   let seeked = !saved;
   let lastSave = 0;
   let listenTimer = null;
@@ -914,6 +958,20 @@ export function mountRemoteWatch(root, id) {
     } catch {
       /* the frame went away */
     }
+  };
+
+  /* Rate is honoured by the embed. Quality commands are still sent because
+     older players support them, but YouTube usually keeps its own adaptive
+     quality; the menu shows what is actually playing. */
+  const applyPrefs = () => {
+    if (!frame) return;
+    send({ event: 'command', func: 'setPlaybackRate', args: [currentRate()] });
+    const quality = currentQuality();
+    send({
+      event: 'command',
+      func: 'setPlaybackQuality',
+      args: [quality === 'auto' ? 'default' : quality],
+    });
   };
 
   const save = (force = false) => {
@@ -966,8 +1024,14 @@ export function mountRemoteWatch(root, id) {
     }
     if (!data || typeof data !== 'object') return;
 
+    if (data.event === 'onReady' || data.event === 'initialDelivery') applyPrefs();
+
     const info = data.info;
     if (!info || typeof info !== 'object') return;
+
+    if (typeof info.playbackQuality === 'string' && info.playbackQuality !== 'unknown') {
+      actualQuality = info.playbackQuality;
+    }
 
     // duration is reliable in initialDelivery; some videos only send time later
     if (typeof info.duration === 'number' && info.duration > 0) {
@@ -1044,6 +1108,52 @@ export function mountRemoteWatch(root, id) {
 
   playBtn?.addEventListener('click', startPlayback);
   root.querySelector('[data-copy-remote]')?.addEventListener('click', () => copyLink());
+
+  paintPrefs();
+
+  rateBtn?.addEventListener('click', () => {
+    const current = currentRate();
+    openMenu(
+      rateBtn,
+      YT_RATES.map((rate) => ({
+        key: `rate-${rate}`,
+        label: rate === 1 ? 'Normal (1×)' : `${rate}×`,
+        checked: current === rate,
+        onClick: () => {
+          store.set('ytRate', rate);
+          paintPrefs();
+          send({ event: 'command', func: 'setPlaybackRate', args: [rate] });
+          toast(rate === 1 ? 'Normal speed' : `Speed ${rate}×`);
+        },
+      }))
+    );
+  });
+
+  qualityBtn?.addEventListener('click', () => {
+    const actual = YT_QUALITY_NAMES[actualQuality];
+    openMenu(qualityBtn, [
+      {
+        note: actual
+          ? `Playing at ${actual}. YouTube can still adjust this automatically.`
+          : 'YouTube adjusts quality automatically based on your connection.',
+      },
+      ...YT_QUALITIES.map(([value, label]) => ({
+        key: `quality-${value}`,
+        label: value === 'auto' ? 'Auto (recommended)' : label,
+        checked: currentQuality() === value,
+        onClick: () => {
+          store.set('ytQuality', value);
+          paintPrefs();
+          send({
+            event: 'command',
+            func: 'setPlaybackQuality',
+            args: [value === 'auto' ? 'default' : value],
+          });
+          toast(value === 'auto' ? 'Quality set to auto' : `Prefer ${label} — YouTube may adjust`);
+        },
+      })),
+    ]);
+  });
 
   const desc = root.querySelector('[data-desc]');
   desc?.addEventListener('click', (e) => {

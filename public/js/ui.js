@@ -56,6 +56,7 @@ export function openMenu(anchor, items) {
   menu.innerHTML = items
     .map((item) => {
       if (item.sep) return '<div class="sep"></div>';
+      if (item.note) return `<div class="menu-note">${escapeText(item.note)}</div>`;
       if (item.href) {
         return `<a role="menuitem" href="${item.href}" data-link>${item.icon ? icon(item.icon) : ''}<span>${escapeText(item.label)}</span></a>`;
       }

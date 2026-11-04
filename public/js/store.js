@@ -19,6 +19,8 @@ const defaults = {
   rate: 1,
   topics: [],
   resume: [],
+  ytRate: 1,
+  ytQuality: 'auto',
 };
 
 function read() {

@@ -27,6 +27,8 @@ Then open <http://localhost:3000>.
 - **Continue watching** — playback position is remembered per YouTube video and
   unfinished videos appear in a resume rail on Home, with a progress bar, time
   left, and a one-tap **Start over**.
+- **Playback controls** — speed from 0.5× to 2× and a quality preference
+  (YouTube still controls the final adaptive quality), remembered on the device.
 - **Your topics** — the home chips are whatever you add: type a topic and it
   becomes an endless YouTube feed. No fixed categories.
 - **Library** — watch history, liked videos, and watch later, stored on your machine.

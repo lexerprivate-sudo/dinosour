@@ -940,6 +940,13 @@ body.sheet-open { overflow: hidden; }
 .menu button:hover, .menu a:hover { background: var(--hover); }
 .menu .icon { width: 20px; height: 20px; color: var(--text-2); }
 .menu .sep { height: 1px; background: var(--border-soft); margin: 6px 4px; }
+.menu-note {
+  max-width: 250px;
+  padding: 4px 12px 9px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .menu .checked { margin-left: auto; color: var(--blue); }
 .menu .checked .icon { color: var(--blue); }
 
