@@ -281,6 +281,14 @@ document.addEventListener('click', (e) => {
     return;
   }
 
+  const clearResume = e.target.closest('[data-clear-resume]');
+  if (clearResume) {
+    store.clearResume();
+    view.querySelector('.resume-rail')?.remove();
+    toast('Continue watching cleared');
+    return;
+  }
+
   const addTopic = e.target.closest('[data-topic-add]');
   if (addTopic) {
     e.preventDefault();
@@ -751,7 +759,7 @@ function renderRoute() {
     const id = seg[2];
     html = renderRemoteWatch(id);
     mount = () => {
-      mountRemoteWatch(view, id);
+      currentWatch = mountRemoteWatch(view, id);
     };
     title = 'YouTube';
     searchInput.value = '';

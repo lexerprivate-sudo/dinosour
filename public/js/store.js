@@ -18,6 +18,7 @@ const defaults = {
   muted: false,
   rate: 1,
   topics: [],
+  resume: [],
 };
 
 function read() {
@@ -182,6 +183,57 @@ export const store = {
 
   removeTopic(name) {
     this.state.topics = this.customTopics().filter((t) => t !== name);
+    this.save();
+  },
+
+  /* Continue watching for YouTube playback. Entries hold the metadata the
+     home rail needs, so a position survives even though the app has no
+     local catalog for remote videos. */
+  resumeList() {
+    if (!Array.isArray(this.state.resume)) return [];
+    return this.state.resume.filter(
+      (r) => r && r.id && Number.isFinite(r.t) && Number.isFinite(r.d) && r.d > 0
+    );
+  },
+
+  resumeFor(id) {
+    return this.resumeList().find((r) => r.id === id) || null;
+  },
+
+  saveResume(entry) {
+    if (!entry || !entry.id) return;
+    const t = Number(entry.t);
+    const d = Number(entry.d);
+    if (!Number.isFinite(t) || !Number.isFinite(d) || d <= 0) return;
+
+    const rest = this.resumeList().filter((r) => r.id !== entry.id);
+    // Finished, or barely started: drop it instead of keeping a stale row.
+    if (t < 4 || t > d - 6) {
+      this.state.resume = rest;
+      this.save();
+      return;
+    }
+
+    rest.unshift({
+      id: entry.id,
+      title: entry.title || 'YouTube video',
+      channel: entry.channel || '',
+      thumb: entry.thumb || `https://i.ytimg.com/vi/${entry.id}/mqdefault.jpg`,
+      t,
+      d,
+      at: Date.now(),
+    });
+    this.state.resume = rest.slice(0, 30);
+    this.save();
+  },
+
+  removeResume(id) {
+    this.state.resume = this.resumeList().filter((r) => r.id !== id);
+    this.save();
+  },
+
+  clearResume() {
+    this.state.resume = [];
     this.save();
   },
 };

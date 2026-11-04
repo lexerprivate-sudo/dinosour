@@ -649,6 +649,81 @@ body.sheet-open { overflow: hidden; }
 .section-head .text-btn { color: var(--text-2); font-weight: 600; font-size: 14px; }
 .section-head .text-btn:hover { color: var(--text); }
 
+/* ------------------------------------------------- continue watching */
+
+.resume-rail { padding: 4px 24px 26px; }
+.resume-head { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; }
+.resume-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -.2px;
+}
+.resume-head h2 .icon { width: 24px; height: 24px; color: var(--red); }
+.resume-head .text-btn {
+  margin-left: auto;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.resume-head .text-btn:hover { background: var(--surface-2); color: var(--text); }
+.resume-track {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.resume-track::-webkit-scrollbar { display: none; }
+.resume-card { flex: 0 0 260px; min-width: 0; scroll-snap-align: start; }
+.resume-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.resume-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.resume-left {
+  position: absolute;
+  right: 8px;
+  bottom: 12px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, .8);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .2px;
+}
+.resume-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, .28);
+}
+.resume-bar i { display: block; height: 100%; background: var(--red); }
+.resume-title {
+  margin-top: 9px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.resume-channel { margin-top: 3px; color: var(--text-2); font-size: 12px; }
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
@@ -1395,9 +1470,26 @@ input[type="range"].vol::-moz-range-thumb { width: 12px; height: 12px; border: 0
   object-fit: cover; opacity: .92;
 }
 .yt-play {
-  position: absolute; inset: 0; display: grid; place-items: center;
+  position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px;
+  align-items: center; justify-content: center;
   background: rgba(0, 0, 0, .18); border: 0; cursor: pointer; padding: 0;
 }
+.yt-play-label {
+  color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .9px;
+  text-transform: uppercase; text-shadow: 0 1px 8px rgba(0, 0, 0, .8);
+}
+.yt-resume-hint {
+  position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 1;
+  display: flex; flex-direction: column; gap: 6px; pointer-events: none;
+}
+.yt-resume-badge {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 999px; background: rgba(0, 0, 0, .8);
+  color: #fff; font-size: 12px; font-weight: 600; backdrop-filter: blur(4px);
+}
+.yt-resume-badge .icon { width: 14px; height: 14px; }
+.yt-resume-bar { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, .3); overflow: hidden; }
+.yt-resume-bar i { display: block; height: 100%; background: var(--red); }
 .yt-play-btn {
   width: 76px; height: 54px; border-radius: 14px;
   background: rgba(255, 0, 51, .94); color: #fff;
@@ -1846,6 +1938,18 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
   .section { padding: 0 12px 8px; }
   .shorts { padding-top: 4px; }
   .shorts-track { grid-auto-columns: 150px; gap: 10px; padding: 0 12px 10px; scroll-snap-type: x mandatory; }
+
+  .resume-rail { padding: 2px 12px 20px; }
+  .resume-head { margin: 4px 0 12px; }
+  .resume-head h2 { font-size: 17px; gap: 8px; }
+  .resume-head h2 .icon { width: 21px; height: 21px; }
+  .resume-track { gap: 10px; padding-bottom: 4px; }
+  .resume-card { flex-basis: 218px; }
+  .resume-thumb { border-radius: 10px; }
+  .resume-title { font-size: 13px; line-height: 18px; margin-top: 8px; }
+  .resume-channel { font-size: 11px; }
+  .yt-resume-hint { left: 8px; right: 8px; bottom: 8px; }
+  .yt-resume-badge { font-size: 11px; padding: 4px 9px; }
 
   .results { padding: 14px 12px 24px; }
   .results-head { margin-bottom: 12px; }

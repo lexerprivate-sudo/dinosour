@@ -24,6 +24,11 @@ Then open <http://localhost:3000>.
   from the local library. Suggestions come from YouTube as you type.
 - **YouTube playback** — remote results open on a video page with a click-to-play
   YouTube embed, channel, views and description.
+- **Continue watching** — playback position is remembered per YouTube video and
+  unfinished videos appear in a resume rail on Home, with a progress bar, time
+  left, and a one-tap **Start over**.
+- **Your topics** — the home chips are whatever you add: type a topic and it
+  becomes an endless YouTube feed. No fixed categories.
 - **Library** — watch history, liked videos, and watch later, stored on your machine.
 - **Channel pages** — no subscribe buttons anywhere, by design.
 - **Light and dark themes**, collapsible sidebar, theater mode, keyboard shortcuts.

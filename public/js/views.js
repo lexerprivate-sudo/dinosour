@@ -64,6 +64,7 @@ export function renderHome({ topic = 'All' } = {}) {
   const tail = list.slice(8);
 
   return `${renderChips(topic)}
+  ${!isTopic ? resumeRailHtml() : ''}
   ${
     isTopic
       ? `<section class="topic-banner">
@@ -86,6 +87,33 @@ export function renderHome({ topic = 'All' } = {}) {
     <button type="button" class="btn-more" data-home-retry>Try again</button>
   </div>
   <div class="feed-sentinel" data-home-sentinel aria-hidden="true"></div>`;
+}
+
+/* Continue watching: a rail of in-progress YouTube videos. */
+function resumeCardHtml(r) {
+  const pct = Math.min(100, Math.max(2, (r.t / r.d) * 100));
+  const left = Math.max(0, Math.floor(r.d - r.t));
+  return `<a class="resume-card" href="/watch/yt/${encodeURIComponent(r.id)}" data-link>
+    <div class="resume-thumb">
+      <img src="${esc(r.thumb)}" alt="" loading="lazy">
+      <span class="resume-left">${fmtDuration(left)} left</span>
+      <span class="resume-bar" aria-hidden="true"><i style="width:${pct.toFixed(1)}%"></i></span>
+    </div>
+    <div class="resume-title">${esc(r.title)}</div>
+    <div class="resume-channel">${esc(r.channel || 'YouTube')}</div>
+  </a>`;
+}
+
+function resumeRailHtml() {
+  const items = store.resumeList().slice(0, 10);
+  if (!items.length) return '';
+  return `<section class="resume-rail" aria-label="Continue watching">
+    <div class="resume-head">
+      <h2>${icon('history')} Continue watching</h2>
+      <button type="button" class="text-btn" data-clear-resume>Clear</button>
+    </div>
+    <div class="resume-track">${items.map(resumeCardHtml).join('')}</div>
+  </section>`;
 }
 
 /* The mix behind "All". Invisible to users; it just keeps the feed varied. */
@@ -814,13 +842,24 @@ function remoteMeta(info) {
 export function renderRemoteWatch(id, info = null) {
   const title = info?.title || 'YouTube video';
   const meta = remoteMeta(info);
+  const saved = store.resumeFor(id);
+  const pct = saved ? Math.min(100, Math.max(1, (saved.t / saved.d) * 100)) : 0;
 
   return `<div class="watch yt-watch">
     <div class="watch-main">
       <div class="player yt-player" data-yt-player data-id="${encodeURIComponent(id)}">
         <img class="yt-poster" src="https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg" alt="" width="480" height="360">
-        <button class="yt-play" type="button" data-yt-play aria-label="Play video">
+        ${
+          saved
+            ? `<div class="yt-resume-hint">
+                <span class="yt-resume-badge">${icon('history')} Resume at ${fmtDuration(saved.t)}</span>
+                <span class="yt-resume-bar" aria-hidden="true"><i style="width:${pct.toFixed(1)}%"></i></span>
+              </div>`
+            : ''
+        }
+        <button class="yt-play" type="button" data-yt-play aria-label="${saved ? 'Resume video' : 'Play video'}">
           <span class="yt-play-btn">${icon('play')}</span>
+          ${saved ? '<span class="yt-play-label">Resume</span>' : ''}
         </button>
       </div>
 
@@ -847,21 +886,160 @@ export function renderRemoteWatch(id, info = null) {
   </div>`;
 }
 
-export async function mountRemoteWatch(root, id) {
+export function mountRemoteWatch(root, id) {
   const playerEl = root.querySelector('[data-yt-player]');
   const playBtn = playerEl?.querySelector('[data-yt-play]');
+  const saved = store.resumeFor(id);
+
+  const meta = {
+    title: saved?.title || root.querySelector('[data-yt-title]')?.textContent || 'YouTube video',
+    channel: saved?.channel || '',
+    thumb: saved?.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(id)}/mqdefault.jpg`,
+  };
+
+  let frame = null;
+  let duration = saved?.d || 0;
+  let position = saved?.t || 0;
+  let startAt = saved?.t || 0;
+  let seeked = !saved;
+  let lastSave = 0;
+  let listenTimer = null;
+  let seekTimer = null;
+  let listenTries = 0;
+  let destroyed = false;
+
+  const send = (payload) => {
+    try {
+      frame?.contentWindow?.postMessage(JSON.stringify(payload), '*');
+    } catch {
+      /* the frame went away */
+    }
+  };
+
+  const save = (force = false) => {
+    if (destroyed || !duration || !position) return;
+    const now = Date.now();
+    if (!force && now - lastSave < 5000) return;
+    lastSave = now;
+    store.saveResume({ ...meta, id, t: position, d: duration });
+  };
+
+  const seekTo = (time, announce) => {
+    if (!Number.isFinite(time) || time < 0) return;
+    position = time;
+    startAt = time;
+    send({ event: 'command', func: 'seekTo', args: [time, true] });
+    if (announce) {
+      toast(`Resumed from ${fmtDuration(time)}`, {
+        action: 'Start over',
+        onAction: () => {
+          seekTo(0, false);
+          store.removeResume(id);
+        },
+      });
+    }
+  };
+
+  /* YouTube only reports duration once, in initialDelivery. Wait for it, then
+     jump to the saved spot exactly once so it can't fight the user seeking. */
+  const maybeSeek = () => {
+    if (seeked || destroyed || !duration) return;
+    if (startAt < 4 || startAt > duration - 6) {
+      seeked = true;
+      return;
+    }
+    seeked = true;
+    seekTimer = setTimeout(() => {
+      if (!destroyed) seekTo(startAt, true);
+    }, 700);
+  };
+
+  const onMessage = (event) => {
+    if (destroyed || !frame || event.source !== frame.contentWindow) return;
+    let data = event.data;
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data);
+      } catch {
+        return;
+      }
+    }
+    if (!data || typeof data !== 'object') return;
+
+    const info = data.info;
+    if (!info || typeof info !== 'object') return;
+
+    // duration is reliable in initialDelivery; some videos only send time later
+    if (typeof info.duration === 'number' && info.duration > 0) {
+      duration = info.duration;
+    } else {
+      const seconds = Number(info.videoData?.videoDetails?.lengthSeconds);
+      if (Number.isFinite(seconds) && seconds > 0) duration = seconds;
+    }
+
+    if (typeof info.currentTime === 'number') {
+      position = info.currentTime;
+      // Don't wait for playerState: several videos omit it from infoDelivery.
+      if (duration) {
+        maybeSeek();
+        if (position >= duration - 2) store.removeResume(id);
+        else if (position > 4) save();
+      }
+    }
+
+    const state = typeof info.playerState === 'number' ? info.playerState : null;
+    if (state === 2) save(true);
+    else if (state === 0) store.removeResume(id);
+  };
+
+  /* Ask the player to report its clock. A few retries covers slow loads. */
+  const listen = () => {
+    if (destroyed || !frame) return;
+    send({ event: 'listening', id: `dinosour-${id}` });
+    listenTries += 1;
+    listenTimer = listenTries < 8 ? setTimeout(listen, 1200) : null;
+  };
+
+  const onHide = () => {
+    if (document.visibilityState === 'hidden') save(true);
+  };
+
+  const onPageHide = () => save(true);
+
+  const destroy = () => {
+    if (destroyed) return;
+    save(true);
+    destroyed = true;
+    window.removeEventListener('message', onMessage);
+    document.removeEventListener('visibilitychange', onHide);
+    window.removeEventListener('pagehide', onPageHide);
+    clearTimeout(listenTimer);
+    clearTimeout(seekTimer);
+    send({ event: 'command', func: 'pauseVideo', args: [] });
+    frame = null;
+  };
+
+  window.addEventListener('message', onMessage);
+  document.addEventListener('visibilitychange', onHide);
+  window.addEventListener('pagehide', onPageHide);
 
   const startPlayback = () => {
     if (!playerEl || playerEl.classList.contains('playing')) return;
-    const frame = document.createElement('iframe');
+    frame = document.createElement('iframe');
     frame.className = 'yt-frame';
-    frame.src = `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white${APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`}`;
+    const startParam =
+      saved && saved.t >= 4 && (!saved.d || saved.t < saved.d - 6) ? `&start=${Math.floor(saved.t)}` : '';
+    frame.src = `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1${startParam}${APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`}`;
     frame.title = root.querySelector('[data-yt-title]')?.textContent || 'YouTube video';
     frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
     frame.allowFullscreen = true;
     frame.referrerPolicy = 'strict-origin-when-cross-origin';
     playerEl.replaceChildren(frame);
     playerEl.classList.add('playing');
+    frame.addEventListener('load', () => {
+      listenTries = 0;
+      listen();
+    });
   };
 
   playBtn?.addEventListener('click', startPlayback);
@@ -874,47 +1052,53 @@ export async function mountRemoteWatch(root, id) {
     desc.querySelector('[data-desc-toggle]').textContent = open ? 'Show less' : 'Show more';
   });
 
-  const info = await videoInfo(id);
-  if (!playerEl?.isConnected) return;
+  (async () => {
+    const info = await videoInfo(id);
+    if (destroyed || !playerEl?.isConnected) return;
 
-  let channel = '';
-  if (info) {
-    channel = info.channel || '';
-    const titleEl = root.querySelector('[data-yt-title]');
-    if (titleEl) titleEl.textContent = info.title;
-    document.title = `${info.title} — dinosour`;
+    let channel = '';
+    if (info) {
+      channel = info.channel || '';
+      meta.title = info.title || meta.title;
+      meta.channel = info.channel || meta.channel;
+      const titleEl = root.querySelector('[data-yt-title]');
+      if (titleEl) titleEl.textContent = info.title;
+      document.title = `${info.title} — dinosour`;
 
-    const metaEl = root.querySelector('[data-yt-meta]');
-    const meta = remoteMeta(info);
-    if (metaEl && meta) metaEl.textContent = meta;
+      const metaEl = root.querySelector('[data-yt-meta]');
+      const infoMeta = remoteMeta(info);
+      if (metaEl && infoMeta) metaEl.textContent = infoMeta;
 
-    if (info.description) {
-      desc.hidden = false;
-      root.querySelector('[data-yt-text]').textContent = info.description;
+      if (info.description) {
+        desc.hidden = false;
+        root.querySelector('[data-yt-text]').textContent = info.description;
+      }
     }
-  }
 
-  const relatedEl = root.querySelector('[data-yt-related-list]');
-  if (!relatedEl) return;
+    const relatedEl = root.querySelector('[data-yt-related-list]');
+    if (!relatedEl) return;
 
-  const seed = channel || root.dataset.query || '';
-  if (!seed) {
-    relatedEl.innerHTML = '<p class="related-empty">No related videos found.</p>';
-    return;
-  }
-
-  try {
-    const data = await searchYouTube(seed);
-    if (!playerEl?.isConnected) return;
-    const videos = (data.videos || []).filter((v) => v.id !== id).slice(0, 12);
-    relatedEl.innerHTML = videos.length
-      ? videos.map(ytRelItemHtml).join('')
-      : '<p class="related-empty">No related videos found.</p>';
-  } catch {
-    if (playerEl?.isConnected) {
-      relatedEl.innerHTML = '<p class="related-empty">Related videos are unavailable right now.</p>';
+    const seed = channel || root.dataset.query || '';
+    if (!seed) {
+      relatedEl.innerHTML = '<p class="related-empty">No related videos found.</p>';
+      return;
     }
-  }
+
+    try {
+      const data = await searchYouTube(seed);
+      if (destroyed || !playerEl?.isConnected) return;
+      const videos = (data.videos || []).filter((v) => v.id !== id).slice(0, 12);
+      relatedEl.innerHTML = videos.length
+        ? videos.map(ytRelItemHtml).join('')
+        : '<p class="related-empty">No related videos found.</p>';
+    } catch {
+      if (playerEl?.isConnected) {
+        relatedEl.innerHTML = '<p class="related-empty">Related videos are unavailable right now.</p>';
+      }
+    }
+  })();
+
+  return { destroy };
 }
 
 function resultItemHtml(v) {
