@@ -147,16 +147,27 @@ the computer; the app is YouTube search, home and playback. The phone layout is
 not the desktop layout squeezed down: it has full-bleed cards, side-by-side
 search results, a sticky player, and a compact bottom bar.
 
+The fixed category chips are gone. The home feed is built from **your topics**
+instead: tap **Add topic**, type anything (football, cooking, lofi, …), and it
+becomes a chip that drives an endless YouTube feed. Topics are stored on the
+phone and survive updates. Settings also holds the update checker, the topic
+manager, and the light/dark switch.
+
 The APK is signed with the local debug key in `mobile/debug.keystore`. That is
 fine for sideloading; do not publish it to a store.
 
 ### Updates
 
-The app checks the latest GitHub release on launch (and when you come back to
-it) and downloads it in the background. When it is ready, one dialog installs
-it; the update replaces the old app and keeps your settings. Android asks once
-for permission to install from dinosour, and it always shows its own install
-confirmation for apps installed outside the Play Store.
+Updates are automatic. The app checks the latest GitHub release every time it
+opens (and periodically while it is running), downloads a newer APK in the
+background, and pops up an in-app dialog when it is ready. Tap **Install** and
+Android shows its own confirmation; the update replaces the old app and keeps
+your topics and settings. Choosing **Later** hides that version until you ask
+again. **Settings → Check for updates** forces a check at any time.
+
+Android does not allow a normal app to install silently: the system install
+dialog always appears once, and Android asks once for permission to install
+from dinosour. Nothing else is manual — no GitHub visit, no file copying.
 
 Publish a release with:
 

@@ -4,10 +4,14 @@
   <string name="offline_body">dinosour couldn\'t start. Try again, and check that your phone has an internet connection.</string>
   <string name="retry">Try again</string>
   <string name="update_title">Update ready</string>
-  <string name="update_body">dinosour %1$s has been downloaded. Install it now? Your settings stay as they are.</string>
+  <string name="update_body">dinosour %1$s has been downloaded. Install it now? It replaces the old version and keeps your topics and settings.</string>
   <string name="update_now">Install</string>
   <string name="update_later">Later</string>
-  <string name="update_failed">Couldn\'t download the update. Try again later.</string>
+  <string name="update_current_title">You\'re up to date</string>
+  <string name="update_current_body">dinosour %1$s is the latest version.</string>
+  <string name="update_error_title">Couldn\'t check for updates</string>
+  <string name="update_error_body">Check your internet connection and try again.</string>
+  <string name="update_failed">Couldn\'t open the installer. Try again.</string>
   <string name="update_install_title">Allow updates</string>
   <string name="update_install_body">Android needs your permission to install the update. Tap Settings, allow dinosour, then come back.</string>
   <string name="open_settings">Settings</string>

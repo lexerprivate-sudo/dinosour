@@ -17,6 +17,7 @@ const defaults = {
   volume: 1,
   muted: false,
   rate: 1,
+  topics: [],
 };
 
 function read() {
@@ -161,4 +162,26 @@ export const store = {
 
   likedIds() { return Object.keys(this.state.liked); },
   savedIds() { return Object.keys(this.state.saved); },
+
+  /* Home feed topics. Users invent these themselves; each one becomes a
+     YouTube search seed behind its own chip. */
+  customTopics() {
+    return Array.isArray(this.state.topics) ? this.state.topics.filter((t) => typeof t === 'string' && t) : [];
+  },
+
+  addTopic(name) {
+    const value = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!value) return null;
+    const topics = this.customTopics();
+    if (topics.length >= 12) return null;
+    if (topics.some((t) => t.toLowerCase() === value.toLowerCase())) return null;
+    this.state.topics = [...topics, value];
+    this.save();
+    return value;
+  },
+
+  removeTopic(name) {
+    this.state.topics = this.customTopics().filter((t) => t !== name);
+    this.save();
+  },
 };

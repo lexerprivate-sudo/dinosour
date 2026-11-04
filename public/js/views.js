@@ -3,7 +3,6 @@
 import { Player } from './player.js';
 import { store } from './store.js';
 import {
-  categories,
   channelById,
   channelVideos,
   commentsFor,
@@ -31,26 +30,31 @@ const icon = (name, cls = '') =>
 
 /* ============================================================ home */
 
-function chipsHtml(active = 'All') {
-  const list = ['All', ...categories()];
-  return `<div class="chips-wrap"><div class="chips" role="tablist" aria-label="Categories">${list
+/* Topic chips: All, the user's own topics, and a button to add more. */
+export function renderChips(active = 'All') {
+  const topics = store.customTopics();
+  const list = ['All', ...topics];
+  return `<div class="chips-wrap"><div class="chips" role="tablist" aria-label="Topics">${list
     .map(
       (c) =>
-        `<button class="chip ${c === active ? 'active' : ''}" data-chip="${esc(c)}" role="tab" aria-selected="${c === active}">${esc(c)}</button>`
+        `<button type="button" class="chip ${c === active ? 'active' : ''}" data-chip="${esc(c)}" role="tab" aria-selected="${c === active}">${esc(c)}</button>`
     )
-    .join('')}</div></div>`;
+    .join('')}<button type="button" class="chip chip-add" data-topic-add aria-label="Add a topic" title="Add a topic">${icon(
+    'plus'
+  )}<span>Add topic</span></button></div></div>`;
 }
 
-export function renderHome({ category = 'All' } = {}) {
-  const pool = APP_MODE ? [] : longVideos();
-  const list = APP_MODE ? [] : category === 'All' ? pool : pool.filter((v) => v.category === category);
-  const shorts = APP_MODE ? [] : shortVideos();
+export function renderHome({ topic = 'All' } = {}) {
+  const isTopic = topic && topic !== 'All';
+  const showLocal = !APP_MODE && !isTopic;
+  const list = showLocal ? longVideos() : [];
+  const shorts = showLocal ? shortVideos() : [];
 
-  if (!APP_MODE && !list.length) {
-    return `${chipsHtml(category)}${emptyState({
+  if (showLocal && !list.length) {
+    return `${renderChips(topic)}${emptyState({
       iconName: 'film',
       title: 'Nothing here yet',
-      text: `There are no videos in “${category}” right now. Try another category.`,
+      text: 'There are no videos in the library right now.',
       actionHref: '/',
       actionText: 'Back to home',
     })}`;
@@ -59,9 +63,22 @@ export function renderHome({ category = 'All' } = {}) {
   const head = list.slice(0, 8);
   const tail = list.slice(8);
 
-  return `${chipsHtml(category)}
+  return `${renderChips(topic)}
+  ${
+    isTopic
+      ? `<section class="topic-banner">
+          <div class="topic-banner-glow" aria-hidden="true"></div>
+          <div class="topic-banner-inner">
+            <span class="topic-eyebrow">${icon('spark')} Your topic</span>
+            <h1>${esc(topic)}</h1>
+            <p>An endless stream of YouTube videos about ${esc(topic)}.</p>
+            <button type="button" class="topic-banner-edit" data-topic-add>${icon('plus')} Edit topics</button>
+          </div>
+        </section>`
+      : ''
+  }
   ${head.length ? `<div class="grid">${head.map(cardHtml).join('')}</div>` : ''}
-  ${category === 'All' && shorts.length ? shortsSection(shorts) : ''}
+  ${!isTopic && shorts.length ? shortsSection(shorts) : ''}
   ${tail.length ? `<div class="grid">${tail.map(cardHtml).join('')}</div>` : ''}
   <div class="grid" data-home-more-grid></div>
   <div class="feed-loader" data-home-more hidden><span class="spinner"></span></div>
@@ -71,22 +88,23 @@ export function renderHome({ category = 'All' } = {}) {
   <div class="feed-sentinel" data-home-sentinel aria-hidden="true"></div>`;
 }
 
-const FEED_SEEDS = {
-  All: ['lofi music', 'space documentary', '4k nature', 'travel film', 'live music', 'technology', 'food', 'animated short film'],
-  Animation: ['animated short film', '3d animation', 'animation'],
-  Space: ['space documentary', 'nasa', 'astronomy'],
-  Travel: ['travel vlog', 'walking tour 4k', 'travel'],
-  Food: ['food recipe', 'street food', 'cooking'],
-  Music: ['lofi music', 'live music', 'music'],
-  Tech: ['technology', 'programming', 'gadgets'],
-  Nature: ['nature documentary', '4k nature', 'wildlife'],
-};
+/* The mix behind "All". Invisible to users; it just keeps the feed varied. */
+const DEFAULT_SEEDS = [
+  'lofi music',
+  'space documentary',
+  '4k nature',
+  'travel film',
+  'live music',
+  'technology',
+  'food',
+  'animated short film',
+];
 
 const TRENDING_SEEDS = ['trending now', 'popular videos', 'viral videos', 'top music', 'new trailers'];
 
-/** Infinite home feed: the local library first, then live YouTube results. */
-export async function mountHome(root, category = 'All') {
-  return mountFeed(root, FEED_SEEDS[category] || FEED_SEEDS.All);
+/** Infinite home feed: the library for "All" (web), then live YouTube results. */
+export async function mountHome(root, topic = 'All') {
+  return mountFeed(root, topic && topic !== 'All' ? [topic] : DEFAULT_SEEDS);
 }
 
 /** The app's Trending tab: an endless feed of popular YouTube results. */
@@ -1138,4 +1156,80 @@ export function renderNotFound() {
     actionHref: '/',
     actionText: 'Back to home',
   })}</div>`;
+}
+
+/* ============================================================ settings */
+
+export function settingsTopicsHtml() {
+  const topics = store.customTopics();
+  if (!topics.length) return '<span class="settings-empty">No topics yet. Add one and it becomes a button on your home feed.</span>';
+  return topics
+    .map(
+      (t) =>
+        `<span class="topic-pill">${esc(t)}<button type="button" data-topic-remove="${esc(t)}" aria-label="Remove ${esc(t)}">${icon('x')}</button></span>`
+    )
+    .join('');
+}
+
+export function renderSettings() {
+  const app = APP_MODE;
+  return `<div class="page settings-page">
+    <div class="settings-head">
+      <span class="settings-kicker">${icon('sliders')} Preferences</span>
+      <h1>Settings</h1>
+      <p>Everything stays on this device. No account, no sign-in.</p>
+    </div>
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2>Updates</h2>
+          <p>${
+            app
+              ? 'dinosour checks for new versions automatically, downloads them quietly, and pops up when one is ready. You only tap Install.'
+              : 'Automatic updates are built into the Android app.'
+          }</p>
+        </div>
+        <span class="settings-badge ${app ? 'badge-live' : ''}">${app ? 'Automatic' : 'App only'}</span>
+      </div>
+      <div class="settings-line">
+        <span>Current version</span>
+        <strong data-app-version>${app ? '…' : 'Web'}</strong>
+      </div>
+      <div class="settings-actions">
+        <button type="button" class="btn-primary" data-check-update ${app ? '' : 'disabled'}>${icon('refresh')} Check for updates</button>
+        <button type="button" class="btn-outline" data-install-update hidden>${icon('download')} Install update</button>
+      </div>
+      <p class="settings-status" data-update-status role="status"></p>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2>Your topics</h2>
+          <p>These are the buttons above your home feed. Add anything you like — football, cooking, lofi, anything.</p>
+        </div>
+        <span class="settings-badge" data-topic-count>${store.customTopics().length} / 12</span>
+      </div>
+      <div class="settings-topics" data-settings-topics>${settingsTopicsHtml()}</div>
+      <div class="settings-actions">
+        <button type="button" class="btn-outline" data-manage-topics>${icon('plus')} Add or edit topics</button>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2>Appearance</h2>
+          <p>Pick the look you prefer.</p>
+        </div>
+      </div>
+      <div class="theme-choice" data-theme-choice>
+        <button type="button" class="theme-option" data-theme-pick="dark">${icon('moon')} Dark</button>
+        <button type="button" class="theme-option" data-theme-pick="light">${icon('sun')} Light</button>
+      </div>
+    </section>
+
+    <p class="settings-foot">dinosour · Powered by YouTube · No ads, no tracking.</p>
+  </div>`;
 }

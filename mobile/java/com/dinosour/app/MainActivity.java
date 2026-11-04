@@ -17,6 +17,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -60,9 +61,10 @@ public class MainActivity extends Activity {
   private static final String UPDATE_REPO = "lexerprivate-sudo/dinosour";
   private static final String UPDATE_API =
       "https://api.github.com/repos/" + UPDATE_REPO + "/releases/latest";
-  private static final long UPDATE_INTERVAL = 5 * 60 * 1000L;
+  private static final long UPDATE_INTERVAL = 15 * 60 * 1000L;
   private static final String KEY_LAST_UPDATE = "last_update_check";
   private static final String KEY_PENDING_VERSION = "pending_version";
+  private static final String KEY_SKIPPED_VERSION = "skipped_version";
 
   private WebView web;
   private FrameLayout root;
@@ -76,6 +78,7 @@ public class MainActivity extends Activity {
   private WebChromeClient.CustomViewCallback customViewCallback;
   private File pendingUpdate;
   private boolean installRequested;
+  private boolean checkedThisLaunch;
 
   private final ExecutorService io = Executors.newSingleThreadExecutor();
   private final Handler ui = new Handler(Looper.getMainLooper());
@@ -118,6 +121,7 @@ public class MainActivity extends Activity {
     web.setBackgroundColor(Color.parseColor("#0F0F0F"));
     web.setOverScrollMode(View.OVER_SCROLL_NEVER);
     WebView.setWebContentsDebuggingEnabled(true);
+    web.addJavascriptInterface(new Bridge(), "Dinosour");
 
     web.setWebViewClient(new WebViewClient() {
       @Override
@@ -373,15 +377,34 @@ public class MainActivity extends Activity {
   /* ------------------------------------------------------------- updates */
 
   private void checkForUpdate() {
+    checkForUpdate(false, false);
+  }
+
+  /**
+   * Looks at the latest GitHub release, downloads the APK in the background,
+   * and prompts to install. Runs automatically and from Settings.
+   *
+   * @param force  ignore the throttle (Settings' "Check for updates")
+   * @param notify report progress to the page and show result dialogs
+   */
+  private void checkForUpdate(final boolean force, final boolean notify) {
     final SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-    if (System.currentTimeMillis() - prefs.getLong(KEY_LAST_UPDATE, 0) < UPDATE_INTERVAL) return;
+    long last = prefs.getLong(KEY_LAST_UPDATE, 0);
+    if (!force && System.currentTimeMillis() - last < UPDATE_INTERVAL) return;
     prefs.edit().putLong(KEY_LAST_UPDATE, System.currentTimeMillis()).apply();
+    if (notify) emitUpdate("checking", "Checking for updates…");
 
     io.execute(() -> {
       try {
         JSONObject release = getJson(UPDATE_API);
         final String tag = release.optString("tag_name", "").replaceFirst("^[vV]", "");
-        if (tag.isEmpty() || !isNewer(tag, currentVersion())) return;
+        if (tag.isEmpty() || !isNewer(tag, currentVersion())) {
+          if (notify) {
+            emitUpdate("uptodate", "dinosour " + currentVersion() + " is up to date.");
+            ui.post(this::showUpToDate);
+          }
+          return;
+        }
 
         String apkUrl = "";
         JSONArray assets = release.optJSONArray("assets");
@@ -394,24 +417,44 @@ public class MainActivity extends Activity {
             }
           }
         }
-        if (apkUrl.isEmpty()) return;
+        if (apkUrl.isEmpty()) {
+          if (notify) emitUpdate("error", "The update has no APK attached.");
+          return;
+        }
 
         final String url = apkUrl;
         final File file = UpdateProvider.apkFile(this);
         final String cached = prefs.getString(KEY_PENDING_VERSION, "");
         if (!file.exists() || !file.isFile() || !tag.equals(cached)) {
-          if (!download(url, file)) return;
+          if (notify) emitUpdate("downloading", "Downloading dinosour " + tag + "…");
+          if (!download(url, file, tag)) {
+            if (notify) emitUpdate("error", "Couldn't download the update. Try again.");
+            return;
+          }
         }
+
         pendingUpdate = file;
         prefs.edit().putString(KEY_PENDING_VERSION, tag).apply();
-        ui.post(() -> promptUpdate(tag));
-      } catch (Exception ignored) {
-        // Offline or rate limited; try again later.
+        emitUpdate("ready", "dinosour " + tag + " is ready to install.");
+
+        boolean skipped = tag.equals(prefs.getString(KEY_SKIPPED_VERSION, ""));
+        if (notify) {
+          prefs.edit().remove(KEY_SKIPPED_VERSION).apply();
+          ui.post(() -> promptUpdate(tag));
+        } else if (!skipped) {
+          ui.post(() -> promptUpdate(tag));
+        }
+      } catch (Exception error) {
+        if (notify) {
+          emitUpdate("error", "Couldn't check for updates. Check your connection.");
+          ui.post(this::showUpdateError);
+        }
+        // Otherwise offline or rate limited; try again later.
       }
     });
   }
 
-  private boolean download(String url, File file) {
+  private boolean download(String url, File file, String version) {
     HttpURLConnection conn = null;
     try {
       if (file.exists() && !file.delete()) return false;
@@ -422,11 +465,24 @@ public class MainActivity extends Activity {
       conn.setRequestProperty("User-Agent", "dinosour-app");
       conn.setRequestProperty("Accept", "application/octet-stream");
 
+      int total = conn.getContentLength();
+      long read = 0;
+      int lastPercent = -1;
       try (InputStream in = conn.getInputStream();
            FileOutputStream out = new FileOutputStream(file)) {
         byte[] buffer = new byte[16384];
         int n;
-        while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+        while ((n = in.read(buffer)) != -1) {
+          out.write(buffer, 0, n);
+          read += n;
+          if (total > 0) {
+            int percent = (int) (read * 100 / total);
+            if (percent >= lastPercent + 10) {
+              lastPercent = percent;
+              emitUpdate("downloading", "Downloading dinosour " + version + "… " + percent + "%");
+            }
+          }
+        }
       }
       return true;
     } catch (Exception error) {
@@ -435,6 +491,24 @@ public class MainActivity extends Activity {
     } finally {
       if (conn != null) conn.disconnect();
     }
+  }
+
+  private void showUpToDate() {
+    if (isFinishing()) return;
+    new AlertDialog.Builder(this)
+        .setTitle(R.string.update_current_title)
+        .setMessage(getString(R.string.update_current_body, currentVersion()))
+        .setPositiveButton(android.R.string.ok, null)
+        .show();
+  }
+
+  private void showUpdateError() {
+    if (isFinishing()) return;
+    new AlertDialog.Builder(this)
+        .setTitle(R.string.update_error_title)
+        .setMessage(R.string.update_error_body)
+        .setPositiveButton(android.R.string.ok, null)
+        .show();
   }
 
   private void promptUpdate(final String version) {
@@ -446,8 +520,24 @@ public class MainActivity extends Activity {
           installRequested = true;
           installUpdate();
         })
-        .setNegativeButton(R.string.update_later, (dialog, which) -> installRequested = false)
+        .setNegativeButton(R.string.update_later, (dialog, which) -> {
+          installRequested = false;
+          getSharedPreferences(PREFS, MODE_PRIVATE)
+              .edit()
+              .putString(KEY_SKIPPED_VERSION, version)
+              .apply();
+        })
         .show();
+  }
+
+  /** Sends update progress to the Settings page, if it is open. */
+  private void emitUpdate(final String state, final String message) {
+    ui.post(() -> {
+      if (web == null) return;
+      String js = "window.__dinosourNative&&window.__dinosourNative.update("
+          + JSONObject.quote(state) + "," + JSONObject.quote(message) + ")";
+      web.evaluateJavascript(js, null);
+    });
   }
 
   private boolean canInstallUpdates() {
@@ -456,7 +546,11 @@ public class MainActivity extends Activity {
   }
 
   private void installUpdate() {
-    if (pendingUpdate == null || !pendingUpdate.exists()) return;
+    if (pendingApk() == null) {
+      // Ask the update server once; this also sets pendingUpdate.
+      checkForUpdate(true, true);
+      return;
+    }
     if (!canInstallUpdates()) {
       new AlertDialog.Builder(this)
           .setTitle(R.string.update_install_title)
@@ -481,10 +575,56 @@ public class MainActivity extends Activity {
     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
     pendingUpdate = null;
     installRequested = false;
+    emitUpdate("installing", "Opening the installer…");
     try {
       startActivity(intent);
     } catch (Exception error) {
       Toast.makeText(this, R.string.update_failed, Toast.LENGTH_LONG).show();
+    }
+  }
+
+  /** The downloaded APK, restored from disk after a restart as well. */
+  private File pendingApk() {
+    if (pendingUpdate != null && pendingUpdate.exists()) return pendingUpdate;
+    SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+    if (prefs.getString(KEY_PENDING_VERSION, "").isEmpty()) return null;
+    File file = UpdateProvider.apkFile(this);
+    if (!file.exists() || !file.isFile()) return null;
+    pendingUpdate = file;
+    return file;
+  }
+
+  /** Small API exposed to the bundled site as window.Dinosour. */
+  private class Bridge {
+    @JavascriptInterface
+    public String appVersion() {
+      return currentVersion();
+    }
+
+    @JavascriptInterface
+    public String readyVersion() {
+      SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+      String pending = prefs.getString(KEY_PENDING_VERSION, "");
+      if (pending.isEmpty() || !isNewer(pending, currentVersion())) return "";
+      File file = UpdateProvider.apkFile(MainActivity.this);
+      return file.exists() && file.isFile() ? pending : "";
+    }
+
+    @JavascriptInterface
+    public void checkNow() {
+      ui.post(() -> checkForUpdate(true, true));
+    }
+
+    @JavascriptInterface
+    public void installNow() {
+      ui.post(() -> {
+        if (pendingApk() == null) {
+          checkForUpdate(true, true);
+        } else {
+          installRequested = true;
+          installUpdate();
+        }
+      });
     }
   }
 
@@ -575,6 +715,10 @@ public class MainActivity extends Activity {
     if (web != null) web.onResume();
     if (pendingUpdate != null && pendingUpdate.exists() && installRequested && canInstallUpdates()) {
       installUpdate();
+    } else if (!checkedThisLaunch) {
+      // Always look once when the app is opened, then throttle background resumes.
+      checkedThisLaunch = true;
+      checkForUpdate(true, false);
     } else {
       checkForUpdate();
     }
