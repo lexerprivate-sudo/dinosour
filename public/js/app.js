@@ -6,6 +6,7 @@ import { $, $$, APP_MODE, compact, debounce, esc, icon, prefersReducedMotion } f
 import { closeMenu, navigate, openMenu, toast } from './ui.js';
 import { attachStream, detachStream } from './stream.js';
 import { suggestYouTube } from './yt.js';
+import { closeMini, openMini } from './mini.js';
 import {
   mountChannel,
   mountHome,
@@ -719,6 +720,12 @@ function renderRoute() {
   window.__dinosourNative = null;
   closeMenu();
   stopPreview?.();
+
+  // A watch page takes over from the mini player; any other route keeps it.
+  const takingOver = location.pathname.split('/').filter(Boolean)[0] === 'watch';
+  const handoff = currentWatch?.handOff?.() || null;
+  if (takingOver) closeMini();
+
   currentWatch?.destroy();
   currentWatch = null;
   document.body.classList.remove('theater');
@@ -832,6 +839,9 @@ function renderRoute() {
   document.title = title ? `${title} — ${SITE_NAME}` : SITE_NAME;
   window.scrollTo(0, 0);
   updateActiveNav(seg);
+
+  // Keep the video going in the corner when you leave the watch page.
+  if (handoff && !takingOver) openMini(handoff);
 }
 
 function updateActiveNav(seg) {

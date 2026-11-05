@@ -1023,6 +1023,7 @@ export function mountRemoteWatch(root, id) {
   let endTimer = null;
   let endVisible = false;
   let endSuppressed = false;
+  let playing = false;
 
   const endCard = playerEl?.querySelector('[data-yt-end]');
 
@@ -1227,6 +1228,8 @@ export function mountRemoteWatch(root, id) {
     }
 
     if (typeof info.currentTime === 'number') {
+      // Some embeds omit playerState, so advancing time also means "playing".
+      if (info.currentTime > position + 0.05) playing = true;
       position = info.currentTime;
       // Don't wait for playerState: several videos omit it from infoDelivery.
       if (duration) {
@@ -1237,6 +1240,9 @@ export function mountRemoteWatch(root, id) {
     }
 
     const state = typeof info.playerState === 'number' ? info.playerState : null;
+    if (state === 1) playing = true;
+    else if (state === 0 || state === 2) playing = false;
+
     if (state === 2) save(true);
     else if (state === 0) {
       store.removeResume(id);
@@ -1272,6 +1278,20 @@ export function mountRemoteWatch(root, id) {
     clearInterval(endTimer);
     send({ event: 'command', func: 'pauseVideo', args: [] });
     frame = null;
+    playing = false;
+  };
+
+  /* Leaving while the video is rolling: the app turns this into a mini player. */
+  const handOff = () => {
+    if (destroyed || !playing || !frame) return null;
+    return {
+      id,
+      title: meta.title,
+      channel: meta.channel,
+      thumb: meta.thumb,
+      position,
+      duration,
+    };
   };
 
   window.addEventListener('message', onMessage);
@@ -1461,7 +1481,7 @@ export function mountRemoteWatch(root, id) {
     }
   })();
 
-  return { destroy };
+  return { destroy, handOff };
 }
 
 function resultItemHtml(v) {
