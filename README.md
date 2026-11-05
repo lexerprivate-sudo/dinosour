@@ -29,6 +29,10 @@ Then open <http://localhost:3000>.
   left, and a one-tap **Start over**.
 - **Playback controls** — speed from 0.5× to 2× and a quality preference
   (YouTube still controls the final adaptive quality), remembered on the device.
+- **Up Next & autoplay** — tap **+** on any related video to queue it. When a video
+  ends, an end screen shows what plays next and counts down instead of stopping,
+  with **Play now**, **Replay** and **Cancel**. Autoplay can be switched off, and
+  the queue is remembered on the device.
 - **Your topics** — the home chips are whatever you add: type a topic and it
   becomes an endless YouTube feed. No fixed categories.
 - **Library** — watch history, liked videos, and watch later, stored on your machine.

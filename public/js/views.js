@@ -817,18 +817,50 @@ function ytResultItemHtml(v) {
   </a>`;
 }
 
-function ytRelItemHtml(v) {
-  return `<a class="rel-item" href="/watch/yt/${encodeURIComponent(v.id)}" data-link>
-    <div class="rel-thumb">
-      <img src="${esc(v.thumb)}" alt="" loading="lazy" width="320" height="180">
-      ${v.length ? `<span class="duration">${esc(v.length)}</span>` : ''}
-    </div>
-    <div class="rel-text">
-      <div class="rel-title">${esc(v.title)}</div>
-      <div class="rel-channel">${esc(v.channel)}</div>
-      <div class="rel-meta">${esc([v.viewsText, v.publishedText].filter(Boolean).join(' · '))}</div>
-    </div>
+function queueAttrs(v) {
+  return `data-add-queue="${esc(v.id)}" data-q-title="${esc(v.title)}" data-q-channel="${esc(
+    v.channel || 'YouTube'
+  )}" data-q-thumb="${esc(v.thumb)}" data-q-length="${esc(v.length || '')}"`;
+}
+
+function queueItemHtml(v) {
+  return `<div class="queue-item">
+    <a class="queue-link" href="/watch/yt/${encodeURIComponent(v.id)}" data-link>
+      <span class="queue-thumb">
+        <img src="${esc(v.thumb)}" alt="" loading="lazy" width="168" height="94">
+        ${v.length ? `<span class="duration">${esc(v.length)}</span>` : ''}
+      </span>
+      <span class="queue-text">
+        <span class="queue-title">${esc(v.title)}</span>
+        <span class="queue-channel">${esc(v.channel || 'YouTube')}</span>
+      </span>
+    </a>
+    <button class="queue-remove" type="button" data-queue-remove="${esc(v.id)}" aria-label="Remove from Up Next" title="Remove from Up Next">${icon('x')}</button>
+  </div>`;
+}
+
+function ytEndItemHtml(v) {
+  return `<a class="end-related-item" href="/watch/yt/${encodeURIComponent(v.id)}?autoplay=1" data-link>
+    <span class="end-related-thumb"><img src="${esc(v.thumb)}" alt="" loading="lazy" width="160" height="90"></span>
+    <span class="end-related-title">${esc(v.title)}</span>
   </a>`;
+}
+
+function ytRelItemHtml(v) {
+  return `<div class="rel-row">
+    <a class="rel-item" href="/watch/yt/${encodeURIComponent(v.id)}" data-link>
+      <div class="rel-thumb">
+        <img src="${esc(v.thumb)}" alt="" loading="lazy" width="320" height="180">
+        ${v.length ? `<span class="duration">${esc(v.length)}</span>` : ''}
+      </div>
+      <div class="rel-text">
+        <div class="rel-title">${esc(v.title)}</div>
+        <div class="rel-channel">${esc(v.channel)}</div>
+        <div class="rel-meta">${esc([v.viewsText, v.publishedText].filter(Boolean).join(' · '))}</div>
+      </div>
+    </a>
+    <button class="rel-add" type="button" ${queueAttrs(v)} aria-label="Add to Up Next" title="Add to Up Next">${icon('plus')}</button>
+  </div>`;
 }
 
 /* ==================================================== YouTube watch */
@@ -867,6 +899,9 @@ export function renderRemoteWatch(id, info = null) {
   const rate = YT_RATES.includes(Number(store.state.ytRate)) ? Number(store.state.ytRate) : 1;
   const quality = YT_QUALITIES.find(([value]) => value === store.state.ytQuality)?.[1] || 'Auto';
 
+  const queue = store.queueList();
+  const autoplay = !!store.state.autoplay;
+
   return `<div class="watch yt-watch">
     <div class="watch-main">
       <div class="player yt-player" data-yt-player data-id="${encodeURIComponent(id)}">
@@ -883,6 +918,27 @@ export function renderRemoteWatch(id, info = null) {
           <span class="yt-play-btn">${icon('play')}</span>
           ${saved ? '<span class="yt-play-label">Resume</span>' : ''}
         </button>
+
+        <div class="end-card yt-end" data-yt-end aria-live="polite">
+          <div class="end-main">
+            <div class="end-label" data-end-label>Up next</div>
+            <div class="end-body">
+              <a class="end-thumb" data-end-link href="#" data-link><img data-end-thumb alt=""></a>
+              <div>
+                <a data-end-link href="#" data-link><div class="end-title" data-end-title></div></a>
+                <div class="end-sub" data-end-sub></div>
+              </div>
+            </div>
+            <div class="end-progress"><i data-end-progress></i></div>
+            <div class="end-related" data-end-related></div>
+          </div>
+          <div class="end-actions">
+            <span class="end-count" data-end-count></span>
+            <button class="btn-ghost" type="button" data-end-act="cancel">Cancel</button>
+            <button class="btn-light" type="button" data-end-act="play">Play now</button>
+            <button class="btn-light" type="button" data-end-act="replay" hidden>Replay</button>
+          </div>
+        </div>
       </div>
 
       <h1 class="watch-title" data-yt-title>${esc(title)}</h1>
@@ -904,6 +960,18 @@ export function renderRemoteWatch(id, info = null) {
     </div>
 
     <aside class="related" aria-label="More videos on YouTube">
+      <section class="up-next" data-up-next>
+        <div class="related-head">
+          <h2>Up Next</h2>
+          <button class="autoplay-toggle" type="button" data-yt-autoplay aria-pressed="${autoplay}">
+            <span class="switch ${autoplay ? 'on' : ''}"></span>Autoplay
+          </button>
+        </div>
+        <div class="up-next-list" data-queue-list>${queue.map(queueItemHtml).join('')}</div>
+        <p class="up-next-empty" data-queue-empty ${queue.length ? 'hidden' : ''}>Tap ${icon('plus')} on any video to line it up here.</p>
+        <button class="text-btn up-next-clear" type="button" data-queue-clear ${queue.length ? '' : 'hidden'}>Clear queue</button>
+      </section>
+
       <div class="related-head"><h2>More on YouTube</h2></div>
       <div data-yt-related-list><p class="related-empty">Loading…</p></div>
     </aside>
@@ -951,6 +1019,12 @@ export function mountRemoteWatch(root, id) {
   let seekTimer = null;
   let listenTries = 0;
   let destroyed = false;
+  let relatedVideos = [];
+  let endTimer = null;
+  let endVisible = false;
+  let endSuppressed = false;
+
+  const endCard = playerEl?.querySelector('[data-yt-end]');
 
   const send = (payload) => {
     try {
@@ -1012,6 +1086,117 @@ export function mountRemoteWatch(root, id) {
     }, 700);
   };
 
+  /* ---------------------------------------------------------- up next */
+
+  const paintQueue = () => {
+    const list = root.querySelector('[data-queue-list]');
+    const empty = root.querySelector('[data-queue-empty]');
+    const clear = root.querySelector('[data-queue-clear]');
+    const queue = store.queueList();
+    if (list) list.innerHTML = queue.map(queueItemHtml).join('');
+    if (empty) empty.hidden = queue.length > 0;
+    if (clear) clear.hidden = queue.length === 0;
+  };
+
+  const nextUp = () => store.queueList()[0] || relatedVideos[0] || null;
+
+  const hideEndCard = () => {
+    endVisible = false;
+    clearInterval(endTimer);
+    endTimer = null;
+    endCard?.classList.remove('visible');
+    const bar = endCard?.querySelector('[data-end-progress]');
+    if (bar) bar.style.width = '0%';
+  };
+
+  const playNext = (video = nextUp()) => {
+    if (!video?.id || destroyed) return;
+    hideEndCard();
+    store.removeFromQueue(video.id);
+    save(true);
+    navigate(`/watch/yt/${encodeURIComponent(video.id)}?autoplay=1`);
+  };
+
+  const replay = () => {
+    hideEndCard();
+    endSuppressed = false;
+    store.removeResume(id);
+    seekTo(0, false);
+    send({ event: 'command', func: 'playVideo', args: [] });
+  };
+
+  const showEndCard = () => {
+    if (!endCard || destroyed || endVisible || endSuppressed) return;
+    endVisible = true;
+    endCard.classList.add('visible');
+
+    const label = endCard.querySelector('[data-end-label]');
+    const title = endCard.querySelector('[data-end-title]');
+    const sub = endCard.querySelector('[data-end-sub]');
+    const thumb = endCard.querySelector('[data-end-thumb]');
+    const links = [...endCard.querySelectorAll('[data-end-link]')];
+    const count = endCard.querySelector('[data-end-count]');
+    const bar = endCard.querySelector('[data-end-progress]');
+    const play = endCard.querySelector('[data-end-act="play"]');
+    const replayBtn = endCard.querySelector('[data-end-act="replay"]');
+    const next = nextUp();
+
+    // "Also next": whatever is queued, then the related rail, without repeats.
+    const also = [...store.queueList(), ...relatedVideos]
+      .filter((v) => v.id !== id && v.id !== next?.id)
+      .filter((v, i, all) => all.findIndex((x) => x.id === v.id) === i)
+      .slice(0, 3);
+    const alsoEl = endCard.querySelector('[data-end-related]');
+    if (alsoEl) alsoEl.innerHTML = also.map(ytEndItemHtml).join('');
+
+    if (!next) {
+      label.textContent = 'Finished';
+      title.textContent = 'Nothing left in the queue';
+      sub.textContent = 'Replay this video or pick one from More on YouTube.';
+      thumb.src = `https://i.ytimg.com/vi/${encodeURIComponent(id)}/mqdefault.jpg`;
+      thumb.alt = '';
+      links.forEach((a) => a.removeAttribute('href'));
+      count.textContent = '';
+      bar.style.width = '0%';
+      play.hidden = true;
+      replayBtn.hidden = false;
+      clearInterval(endTimer);
+      return;
+    }
+
+    const fromQueue = store.queueList()[0]?.id === next.id;
+    label.textContent = fromQueue ? 'Next in your queue' : 'Up next';
+    title.textContent = next.title;
+    sub.textContent = next.channel || 'YouTube';
+    thumb.src = next.thumb;
+    thumb.alt = '';
+    links.forEach((a) => {
+      a.href = `/watch/yt/${encodeURIComponent(next.id)}?autoplay=1`;
+    });
+    play.hidden = false;
+    replayBtn.hidden = true;
+
+    if (!store.state.autoplay) {
+      count.textContent = 'Autoplay is off';
+      bar.style.width = '0%';
+      clearInterval(endTimer);
+      return;
+    }
+
+    const total = 8000;
+    const started = Date.now();
+    clearInterval(endTimer);
+    endTimer = setInterval(() => {
+      const left = total - (Date.now() - started);
+      count.textContent = `Next in ${Math.max(0, Math.ceil(left / 1000))}`;
+      bar.style.width = `${Math.min(100, Math.max(0, 100 - (left / total) * 100))}%`;
+      if (left <= 0) {
+        clearInterval(endTimer);
+        playNext(next);
+      }
+    }, 200);
+  };
+
   const onMessage = (event) => {
     if (destroyed || !frame || event.source !== frame.contentWindow) return;
     let data = event.data;
@@ -1053,7 +1238,12 @@ export function mountRemoteWatch(root, id) {
 
     const state = typeof info.playerState === 'number' ? info.playerState : null;
     if (state === 2) save(true);
-    else if (state === 0) store.removeResume(id);
+    else if (state === 0) {
+      store.removeResume(id);
+      showEndCard();
+    } else if (state === 1 || state === 3) {
+      endSuppressed = false;
+    }
   };
 
   /* Ask the player to report its clock. A few retries covers slow loads. */
@@ -1079,6 +1269,7 @@ export function mountRemoteWatch(root, id) {
     window.removeEventListener('pagehide', onPageHide);
     clearTimeout(listenTimer);
     clearTimeout(seekTimer);
+    clearInterval(endTimer);
     send({ event: 'command', func: 'pauseVideo', args: [] });
     frame = null;
   };
@@ -1099,6 +1290,8 @@ export function mountRemoteWatch(root, id) {
     frame.allowFullscreen = true;
     frame.referrerPolicy = 'strict-origin-when-cross-origin';
     playerEl.replaceChildren(frame);
+    // keep the end screen mounted above the iframe
+    if (endCard) playerEl.append(endCard);
     playerEl.classList.add('playing');
     frame.addEventListener('load', () => {
       listenTries = 0;
@@ -1108,6 +1301,59 @@ export function mountRemoteWatch(root, id) {
 
   playBtn?.addEventListener('click', startPlayback);
   root.querySelector('[data-copy-remote]')?.addEventListener('click', () => copyLink());
+
+  // This video is playing now, so it no longer waits in Up Next.
+  store.removeFromQueue(id);
+  paintQueue();
+
+  root.addEventListener('click', (event) => {
+    const add = event.target.closest('[data-add-queue]');
+    if (add) {
+      const added = store.addToQueue({
+        id: add.dataset.addQueue,
+        title: add.dataset.qTitle,
+        channel: add.dataset.qChannel,
+        thumb: add.dataset.qThumb,
+        length: add.dataset.qLength,
+      });
+      paintQueue();
+      toast(added ? 'Added to Up Next' : 'Already in Up Next');
+      return;
+    }
+
+    const remove = event.target.closest('[data-queue-remove]');
+    if (remove) {
+      store.removeFromQueue(remove.dataset.queueRemove);
+      paintQueue();
+      toast('Removed from Up Next');
+      return;
+    }
+
+    if (event.target.closest('[data-queue-clear]')) {
+      store.clearQueue();
+      paintQueue();
+      toast('Up Next cleared');
+    }
+  });
+
+  root.querySelector('[data-yt-autoplay]')?.addEventListener('click', (event) => {
+    const button = event.currentTarget;
+    const on = !store.state.autoplay;
+    store.set('autoplay', on);
+    button.setAttribute('aria-pressed', String(on));
+    button.querySelector('.switch')?.classList.toggle('on', on);
+    toast(on ? 'Autoplay on' : 'Autoplay off');
+  });
+
+  endCard?.addEventListener('click', (event) => {
+    const act = event.target.closest('[data-end-act]')?.dataset.endAct;
+    if (act === 'play') playNext();
+    else if (act === 'replay') replay();
+    else if (act === 'cancel') {
+      endSuppressed = true;
+      hideEndCard();
+    }
+  });
 
   paintPrefs();
 
@@ -1155,6 +1401,12 @@ export function mountRemoteWatch(root, id) {
     ]);
   });
 
+  // Reached from an end screen: start this video without a second tap.
+  if (new URLSearchParams(location.search).get('autoplay') === '1') {
+    startPlayback();
+    history.replaceState(history.state, '', location.pathname);
+  }
+
   const desc = root.querySelector('[data-desc]');
   desc?.addEventListener('click', (e) => {
     if (e.target.closest('a')) return;
@@ -1198,6 +1450,7 @@ export function mountRemoteWatch(root, id) {
       const data = await searchYouTube(seed);
       if (destroyed || !playerEl?.isConnected) return;
       const videos = (data.videos || []).filter((v) => v.id !== id).slice(0, 12);
+      relatedVideos = videos;
       relatedEl.innerHTML = videos.length
         ? videos.map(ytRelItemHtml).join('')
         : '<p class="related-empty">No related videos found.</p>';

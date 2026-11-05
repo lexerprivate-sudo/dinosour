@@ -19,6 +19,7 @@ const defaults = {
   rate: 1,
   topics: [],
   resume: [],
+  queue: [],
   ytRate: 1,
   ytQuality: 'auto',
 };
@@ -236,6 +237,42 @@ export const store = {
 
   clearResume() {
     this.state.resume = [];
+    this.save();
+  },
+
+  queueList() {
+    return Array.isArray(this.state.queue) ? this.state.queue : [];
+  },
+
+  inQueue(id) {
+    return this.queueList().some((v) => v.id === id);
+  },
+
+  addToQueue(video) {
+    if (!video || !video.id) return false;
+    if (this.inQueue(video.id)) return false;
+    const entry = {
+      id: video.id,
+      title: video.title || 'YouTube video',
+      channel: video.channel || 'YouTube',
+      thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
+      length: video.length || '',
+    };
+    this.state.queue = [...this.queueList(), entry].slice(-30);
+    this.save();
+    return true;
+  },
+
+  removeFromQueue(id) {
+    const list = this.queueList();
+    if (!list.some((v) => v.id === id)) return false;
+    this.state.queue = list.filter((v) => v.id !== id);
+    this.save();
+    return true;
+  },
+
+  clearQueue() {
+    this.state.queue = [];
     this.save();
   },
 };
