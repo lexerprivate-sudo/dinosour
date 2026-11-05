@@ -7,6 +7,7 @@ import { closeMenu, navigate, openMenu, toast } from './ui.js';
 import { attachStream, detachStream } from './stream.js';
 import { suggestYouTube } from './yt.js';
 import { closeMini, openMini } from './mini.js';
+import { onMediaCommand, stopMedia } from './media.js';
 import {
   mountChannel,
   mountHome,
@@ -29,6 +30,9 @@ import {
 } from './views.js';
 
 const SITE_NAME = 'dinosour';
+
+/* Notification and lock-screen buttons call into the app through this hook. */
+window.__dinosourMediaCommand = onMediaCommand;
 
 const view = $('#view');
 const searchForm = $('#searchForm');
@@ -723,11 +727,15 @@ function renderRoute() {
 
   // A watch page takes over from the mini player; any other route keeps it.
   const takingOver = location.pathname.split('/').filter(Boolean)[0] === 'watch';
-  const handoff = currentWatch?.handOff?.() || null;
+  const watch = currentWatch;
+  const handoff = watch?.handOff?.() || null;
   if (takingOver) closeMini();
 
-  currentWatch?.destroy();
+  watch?.destroy();
   currentWatch = null;
+  // A paused video that is not handing over to a mini or another watch page
+  // has nothing left to control, so end the session.
+  if (watch && !handoff && !takingOver) stopMedia();
   document.body.classList.remove('theater');
   closeDrawer();
   hideSuggestions();

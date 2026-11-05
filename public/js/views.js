@@ -24,6 +24,7 @@ import {
 import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, timeAgo, APP_MODE } from './util.js';
 import { navigate, openMenu, toast } from './ui.js';
 import { searchYouTube, videoInfo } from './yt.js';
+import { clearMediaTarget, reportMedia, setMediaTarget } from './media.js';
 
 const icon = (name, cls = '') =>
   `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
@@ -1024,8 +1025,18 @@ export function mountRemoteWatch(root, id) {
   let endVisible = false;
   let endSuppressed = false;
   let playing = false;
+  let reportedPlaying = false;
+  let pausedByUser = false;
+  let pausedAt = 0;
 
   const endCard = playerEl?.querySelector('[data-yt-end]');
+
+  /* Tell the native media session when playback starts or stops. */
+  const syncMedia = (next = playing) => {
+    if (next === reportedPlaying) return;
+    reportedPlaying = next;
+    reportMedia(next, meta.title, meta.channel);
+  };
 
   const send = (payload) => {
     try {
@@ -1048,6 +1059,33 @@ export function mountRemoteWatch(root, id) {
       args: [quality === 'auto' ? 'default' : quality],
     });
   };
+
+  /* Lock-screen and notification controls for this watch page. */
+  const mediaTarget = {
+    play() {
+      if (!playerEl) return;
+      pausedByUser = false;
+      playing = true;
+      syncMedia(true);
+      if (!playerEl.classList.contains('playing')) startPlayback();
+      else send({ event: 'command', func: 'playVideo', args: [] });
+    },
+    pause() {
+      pausedByUser = true;
+      pausedAt = Date.now();
+      playing = false;
+      syncMedia(false);
+      send({ event: 'command', func: 'pauseVideo', args: [] });
+    },
+    stop() {
+      pausedByUser = true;
+      pausedAt = Date.now();
+      playing = false;
+      syncMedia(false);
+      send({ event: 'command', func: 'pauseVideo', args: [] });
+    },
+  };
+  setMediaTarget(mediaTarget);
 
   const save = (force = false) => {
     if (destroyed || !duration || !position) return;
@@ -1229,7 +1267,18 @@ export function mountRemoteWatch(root, id) {
 
     if (typeof info.currentTime === 'number') {
       // Some embeds omit playerState, so advancing time also means "playing".
-      if (info.currentTime > position + 0.05) playing = true;
+      const advancing = info.currentTime > position + 0.05;
+      if (advancing) {
+        if (pausedByUser) {
+          // A pause sent before the player was ready can be lost; repeat it.
+          if (Date.now() - pausedAt >= 2500) {
+            pausedAt = Date.now();
+            send({ event: 'command', func: 'pauseVideo', args: [] });
+          }
+        } else {
+          playing = true;
+        }
+      }
       position = info.currentTime;
       // Don't wait for playerState: several videos omit it from infoDelivery.
       if (duration) {
@@ -1240,8 +1289,22 @@ export function mountRemoteWatch(root, id) {
     }
 
     const state = typeof info.playerState === 'number' ? info.playerState : null;
-    if (state === 1) playing = true;
-    else if (state === 0 || state === 2) playing = false;
+    if (state === 1) {
+      if (pausedByUser) {
+        if (Date.now() - pausedAt >= 2500) {
+          pausedAt = Date.now();
+          send({ event: 'command', func: 'pauseVideo', args: [] });
+        }
+      } else {
+        playing = true;
+      }
+    } else if (state === 0 || state === 2) {
+      playing = false;
+      if (state === 2) {
+        pausedByUser = true;
+        pausedAt = Date.now();
+      }
+    }
 
     if (state === 2) save(true);
     else if (state === 0) {
@@ -1250,6 +1313,8 @@ export function mountRemoteWatch(root, id) {
     } else if (state === 1 || state === 3) {
       endSuppressed = false;
     }
+
+    syncMedia();
   };
 
   /* Ask the player to report its clock. A few retries covers slow loads. */
@@ -1276,6 +1341,7 @@ export function mountRemoteWatch(root, id) {
     clearTimeout(listenTimer);
     clearTimeout(seekTimer);
     clearInterval(endTimer);
+    clearMediaTarget(mediaTarget);
     send({ event: 'command', func: 'pauseVideo', args: [] });
     frame = null;
     playing = false;

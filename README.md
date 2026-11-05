@@ -33,9 +33,13 @@ Then open <http://localhost:3000>.
   ends, an end screen shows what plays next and counts down instead of stopping,
   with **Play now**, **Replay** and **Cancel**. Autoplay can be switched off, and
   the queue is remembered on the device.
-- **Mini player** — leave the watch page while a video is playing and it keeps
+- **Mini player** - leave the watch page while a video is playing and it keeps
   going in a floating corner player with title, progress, expand and close.
   Opening any video page takes over from it.
+- **Background audio** - playback keeps its audio session alive when you leave the
+  app or lock the screen, with play, pause and stop on the lock screen and in the
+  notification shade. YouTube's embedded player may still pause itself when the
+  screen is off; the media controls let you resume without reopening the app.
 - **Your topics** — the home chips are whatever you add: type a topic and it
   becomes an endless YouTube feed. No fixed categories.
 - **Library** — watch history, liked videos, and watch later, stored on your machine.

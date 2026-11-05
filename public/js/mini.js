@@ -3,6 +3,7 @@
 import { store } from './store.js';
 import { APP_MODE, esc } from './util.js';
 import { navigate } from './ui.js';
+import { clearMediaTarget, reportMedia, setMediaTarget, stopMedia } from './media.js';
 
 const icon = (name, cls = '') =>
   `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
@@ -12,6 +13,9 @@ let frame = null;
 let timer = null;
 let lastSave = 0;
 let tries = 0;
+let reportedPlaying = false;
+let pausedByUser = false;
+let pausedAt = 0;
 
 let track = {
   id: '',
@@ -30,6 +34,30 @@ function paintProgress() {
     : 0;
   bar.style.width = `${pct}%`;
 }
+
+function setMiniPlaying(next) {
+  if (next === reportedPlaying) return;
+  reportedPlaying = next;
+  reportMedia(next, track.title, track.channel);
+}
+
+/* Lock-screen and notification buttons drive the mini player. */
+const mediaTarget = {
+  play() {
+    pausedByUser = false;
+    setMiniPlaying(true);
+    send({ event: 'command', func: 'playVideo', args: [] });
+  },
+  pause() {
+    pausedByUser = true;
+    pausedAt = Date.now();
+    setMiniPlaying(false);
+    send({ event: 'command', func: 'pauseVideo', args: [] });
+  },
+  stop() {
+    closeMini();
+  },
+};
 
 function save(force = false) {
   if (!track.id || !track.duration || !track.position) return;
@@ -86,6 +114,19 @@ function onMessage(event) {
   if (typeof info.duration === 'number' && info.duration > 0) track.duration = info.duration;
 
   if (typeof info.currentTime === 'number') {
+    // Some embeds omit playerState, so advancing time also means "playing".
+    const advancing = info.currentTime > track.position + 0.05;
+    if (advancing) {
+      if (pausedByUser) {
+        // A pause sent before the player was ready can be lost; repeat it.
+        if (Date.now() - pausedAt >= 2500) {
+          pausedAt = Date.now();
+          send({ event: 'command', func: 'pauseVideo', args: [] });
+        }
+      } else {
+        setMiniPlaying(true);
+      }
+    }
     track.position = info.currentTime;
     paintProgress();
     if (track.duration && track.position >= track.duration - 2) {
@@ -96,9 +137,24 @@ function onMessage(event) {
     if (track.position > 4) save();
   }
 
-  if (info.playerState === 0) {
-    store.removeResume(track.id);
-    closeMini({ savePosition: false });
+  if (info.playerState === 1) {
+    if (pausedByUser) {
+      if (Date.now() - pausedAt >= 2500) {
+        pausedAt = Date.now();
+        send({ event: 'command', func: 'pauseVideo', args: [] });
+      }
+    } else {
+      setMiniPlaying(true);
+    }
+  } else if (info.playerState === 0 || info.playerState === 2) {
+    if (info.playerState === 0) {
+      store.removeResume(track.id);
+      closeMini({ savePosition: false });
+      return;
+    }
+    pausedByUser = true;
+    pausedAt = Date.now();
+    setMiniPlaying(false);
   }
 }
 
@@ -119,6 +175,9 @@ export function closeMini({ savePosition = true } = {}) {
   if (savePosition) save(true);
   clearTimeout(timer);
   timer = null;
+  clearMediaTarget(mediaTarget);
+  reportedPlaying = false;
+  stopMedia();
   window.removeEventListener('message', onMessage);
   document.removeEventListener('visibilitychange', onHide);
   window.removeEventListener('pagehide', onPageHide);
@@ -192,4 +251,5 @@ export function openMini(video) {
   window.addEventListener('message', onMessage);
   document.addEventListener('visibilitychange', onHide);
   window.addEventListener('pagehide', onPageHide);
+  setMediaTarget(mediaTarget);
 }

@@ -1,5 +1,6 @@
 package com.dinosour.app;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -40,6 +41,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -80,6 +82,11 @@ public class MainActivity extends Activity {
   private boolean installRequested;
   private boolean checkedThisLaunch;
 
+  /** The live activity, so the playback service can push commands into the page. */
+  private static WeakReference<MainActivity> instance = new WeakReference<>(null);
+  private boolean resumed;
+  private boolean notifPrompted;
+
   private final ExecutorService io = Executors.newSingleThreadExecutor();
   private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -87,6 +94,7 @@ public class MainActivity extends Activity {
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
+    instance = new WeakReference<>(this);
     getWindow().setStatusBarColor(Color.parseColor("#0F0F0F"));
     getWindow().setNavigationBarColor(Color.parseColor("#0F0F0F"));
     setContentView(R.layout.activity_main);
@@ -626,6 +634,75 @@ public class MainActivity extends Activity {
         }
       });
     }
+
+    /** Background audio: playback started or stopped in the page. */
+    @JavascriptInterface
+    public void mediaState(final boolean playing, final String title, final String channel) {
+      ui.post(() -> startMedia(playing, title, channel));
+    }
+
+    /** Background audio: tear the session down (video closed or page left). */
+    @JavascriptInterface
+    public void mediaStop() {
+      ui.post(() -> {
+        stopMediaService();
+        if (!resumed && web != null) web.onPause();
+      });
+    }
+  }
+
+  private void startMedia(boolean playing, String title, String channel) {
+    if (playing) ensureNotificationPermission();
+
+    Intent intent = new Intent(this, PlaybackService.class);
+    intent.setAction(PlaybackService.ACTION_UPDATE);
+    intent.putExtra(PlaybackService.EXTRA_PLAYING, playing);
+    if (title != null) intent.putExtra(PlaybackService.EXTRA_TITLE, title);
+    if (channel != null) intent.putExtra(PlaybackService.EXTRA_CHANNEL, channel);
+
+    try {
+      if (playing) {
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
+        else startService(intent);
+      } else if (PlaybackService.RUNNING) {
+        startService(intent);
+      }
+    } catch (Exception ignored) {
+      // Foreground start can be refused while the app is in the background.
+    }
+  }
+
+  private void stopMediaService() {
+    if (!PlaybackService.RUNNING) return;
+    Intent intent = new Intent(this, PlaybackService.class);
+    intent.setAction(PlaybackService.ACTION_STOP);
+    try {
+      startService(intent);
+    } catch (Exception ignored) {
+      // Nothing to stop.
+    }
+  }
+
+  private void ensureNotificationPermission() {
+    if (Build.VERSION.SDK_INT < 33 || notifPrompted) return;
+    if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+      return;
+    }
+    notifPrompted = true;
+    requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 809);
+  }
+
+  /** Called by the playback service on the main thread. */
+  static void sendMediaCommand(final String action) {
+    final MainActivity activity = instance.get();
+    if (activity == null) return;
+    activity.runOnUiThread(() -> {
+      if (activity.isFinishing() || activity.isDestroyed() || activity.web == null) return;
+      activity.web.evaluateJavascript(
+          "window.__dinosourMediaCommand&&window.__dinosourMediaCommand("
+              + JSONObject.quote(action) + ")",
+          null);
+    });
   }
 
   private JSONObject getJson(String url) throws Exception {
@@ -705,13 +782,16 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onPause() {
-    if (web != null) web.onPause();
+    resumed = false;
+    // While audio is playing in the background, keep the page (and the embed) alive.
+    if (web != null && !PlaybackService.RUNNING) web.onPause();
     super.onPause();
   }
 
   @Override
   protected void onResume() {
     super.onResume();
+    resumed = true;
     if (web != null) web.onResume();
     if (pendingUpdate != null && pendingUpdate.exists() && installRequested && canInstallUpdates()) {
       installUpdate();
@@ -726,6 +806,8 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
+    instance = new WeakReference<>(null);
+    stopMediaService();
     io.shutdownNow();
     if (web != null) {
       web.loadUrl("about:blank");
