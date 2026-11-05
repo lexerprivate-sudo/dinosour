@@ -1,6 +1,6 @@
 {
   "name": "dinosour",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "private": true,
   "description": "Search YouTube and watch without an account.",
   "type": "module",
