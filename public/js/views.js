@@ -136,9 +136,11 @@ export async function mountHome(root, topic = 'All') {
   return mountFeed(root, topic && topic !== 'All' ? [topic] : DEFAULT_SEEDS);
 }
 
-/** The app's Trending tab: an endless feed of popular YouTube results. */
-export async function mountTrending(root) {
-  return mountFeed(root, TRENDING_SEEDS);
+/** The Trending tab: popular YouTube results, optionally narrowed to a topic. */
+export async function mountTrending(root, topic = 'All') {
+  if (topic && topic.toLowerCase() !== 'all') return mountFeed(root, [topic]);
+  if (APP_MODE) return mountFeed(root, TRENDING_SEEDS);
+  return {};
 }
 
 async function mountFeed(root, seeds) {
@@ -1370,7 +1372,7 @@ export function mountRemoteWatch(root, id) {
     frame.className = 'yt-frame';
     const startParam =
       saved && saved.t >= 4 && (!saved.d || saved.t < saved.d - 6) ? `&start=${Math.floor(saved.t)}` : '';
-    frame.src = `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1${startParam}${APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`}`;
+    frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1${startParam}${APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`}`;
     frame.title = root.querySelector('[data-yt-title]')?.textContent || 'YouTube video';
     frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
     frame.allowFullscreen = true;
@@ -1703,13 +1705,17 @@ export function mountLibrary(root, kind) {
 
 /* ============================================================ trending */
 
-export function renderTrending() {
-  if (APP_MODE) {
-    return `<div class="page-head" style="padding:24px 24px 0;max-width:1400px;margin:0 auto">
-        <h1>${icon('flame')} Trending</h1>
-        <span class="spacer"></span>
-        <span class="page-count">Popular on YouTube</span>
-      </div>
+export function renderTrending({ topic = 'All' } = {}) {
+  const isTopic = !!topic && topic.toLowerCase() !== 'all';
+  const chips = renderChips(isTopic ? topic : 'All');
+  const head = `<div class="page-head" style="padding:24px 24px 0;max-width:1400px;margin:0 auto">
+      <h1>${icon('flame')} Trending</h1>
+      <span class="spacer"></span>
+      <span class="page-count">${isTopic ? `Popular in ${esc(topic)}` : 'Popular on YouTube'}</span>
+    </div>`;
+
+  if (APP_MODE || isTopic) {
+    return `${chips}${head}
       <div class="grid" data-home-more-grid></div>
       <div class="feed-loader" data-home-more hidden><span class="spinner"></span></div>
       <div class="feed-end" data-home-end hidden>
@@ -1719,11 +1725,7 @@ export function renderTrending() {
   }
 
   const list = [...longVideos(), ...shortVideos()].sort((a, b) => (b.views || 0) - (a.views || 0));
-  return `<div class="page-head" style="padding:24px 24px 0;max-width:1400px;margin:0 auto">
-      <h1>${icon('flame')} Trending</h1>
-      <span class="spacer"></span>
-      <span class="page-count">Most watched in the library</span>
-    </div>
+  return `${chips}${head}
     <div class="grid">${list.map(cardHtml).join('')}</div>`;
 }
 

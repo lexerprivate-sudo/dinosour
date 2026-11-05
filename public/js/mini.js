@@ -223,7 +223,7 @@ export function openMini(video) {
     track.position >= 4 && (!track.duration || track.position < track.duration - 6)
       ? `&start=${Math.floor(track.position)}`
       : '';
-  frame.src = `https://www.youtube.com/embed/${encodeURIComponent(
+  frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(
     track.id
   )}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1${start}${
     APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`

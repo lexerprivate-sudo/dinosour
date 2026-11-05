@@ -23,7 +23,8 @@ Then open <http://localhost:3000>.
 - **Real search** — live YouTube results with infinite "show more", plus matches
   from the local library. Suggestions come from YouTube as you type.
 - **YouTube playback** — remote results open on a video page with a click-to-play
-  YouTube embed, channel, views and description.
+  YouTube embed served from **youtube-nocookie.com**, so playback sets fewer
+  YouTube cookies. Channel, views and description are shown too.
 - **Continue watching** — playback position is remembered per YouTube video and
   unfinished videos appear in a resume rail on Home, with a progress bar, time
   left, and a one-tap **Start over**.
@@ -41,7 +42,8 @@ Then open <http://localhost:3000>.
   notification shade. YouTube's embedded player may still pause itself when the
   screen is off; the media controls let you resume without reopening the app.
 - **Your topics** — the home chips are whatever you add: type a topic and it
-  becomes an endless YouTube feed. No fixed categories.
+  becomes an endless YouTube feed. No fixed categories. The same chips appear on
+  **Trending**, where a topic shows the popular videos for it.
 - **Library** — watch history, liked videos, and watch later, stored on your machine.
 - **Channel pages** — no subscribe buttons anywhere, by design.
 - **Light and dark themes**, collapsible sidebar, theater mode, keyboard shortcuts.

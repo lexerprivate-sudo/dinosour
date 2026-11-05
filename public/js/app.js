@@ -304,7 +304,9 @@ document.addEventListener('click', (e) => {
   const chip = e.target.closest('[data-chip]');
   if (chip) {
     const cat = chip.dataset.chip;
-    navigate(cat === 'All' ? '/' : `/?c=${encodeURIComponent(cat)}`);
+    const onTrending = location.pathname === '/feed/trending';
+    const base = onTrending ? '/feed/trending' : '/';
+    navigate(cat === 'All' ? base : `${base}?c=${encodeURIComponent(cat)}`);
     return;
   }
 
@@ -596,7 +598,7 @@ function closeTopics(silent = false) {
       const active = wrap.querySelector('.chip.active')?.dataset.chip || 'All';
       const still = active === 'All' || store.customTopics().some((t) => t.toLowerCase() === active.toLowerCase());
       if (!still) {
-        navigate('/');
+        navigate(location.pathname === '/feed/trending' ? '/feed/trending' : '/');
         topicsChangedHook?.();
         return;
       }
@@ -819,11 +821,18 @@ function renderRoute() {
       title = TITLES[seg[1]];
     }
   } else if (seg[0] === 'feed' && seg[1] === 'trending') {
-    html = renderTrending();
-    if (APP_MODE) mount = () => {
-      mountTrending(view);
+    const topics = store.customTopics();
+    const requested = url.searchParams.get('c') || 'All';
+    const match =
+      requested === 'All'
+        ? 'All'
+        : topics.find((t) => t.toLowerCase() === requested.toLowerCase());
+    const topic = match || 'All';
+    html = renderTrending({ topic });
+    mount = () => {
+      mountTrending(view, topic);
     };
-    title = 'Trending';
+    title = topic === 'All' ? 'Trending' : `${topic} — Trending`;
   } else if (seg[0] === 'channel' && seg[1]) {
     const ch = channelById(seg[1]);
     html = renderChannel(seg[1]);
