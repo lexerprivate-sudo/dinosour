@@ -7,7 +7,7 @@ import { closeMenu, navigate, openMenu, toast } from './ui.js';
 import { attachStream, detachStream } from './stream.js';
 import { suggestYouTube } from './yt.js';
 import { closeMini, openMini } from './mini.js';
-import { onMediaCommand, stopMedia } from './media.js';
+import { onMediaCommand, setAppVisible, stopMedia } from './media.js';
 import {
   mountChannel,
   mountHome,
@@ -33,6 +33,15 @@ const SITE_NAME = 'dinosour';
 
 /* Notification and lock-screen buttons call into the app through this hook. */
 window.__dinosourMediaCommand = onMediaCommand;
+
+/* MainActivity reports foreground/background so hidden embeds can be kept
+   playing without fighting the user's own pause in the foreground. */
+window.__dinosourAppVisible = setAppVisible;
+
+/* Web build fallback: a hidden tab behaves like a backgrounded app. */
+document.addEventListener('visibilitychange', () => {
+  setAppVisible(document.visibilityState !== 'hidden');
+});
 
 const view = $('#view');
 const searchForm = $('#searchForm');

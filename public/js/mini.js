@@ -3,7 +3,7 @@
 import { store } from './store.js';
 import { APP_MODE, esc } from './util.js';
 import { navigate } from './ui.js';
-import { clearMediaTarget, reportMedia, setMediaTarget, stopMedia } from './media.js';
+import { clearMediaTarget, isAppVisible, reportMedia, setMediaTarget, stopMedia } from './media.js';
 
 const icon = (name, cls = '') =>
   `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
@@ -16,6 +16,10 @@ let tries = 0;
 let reportedPlaying = false;
 let pausedByUser = false;
 let pausedAt = 0;
+let wantPlaying = false;
+let lastAdvance = 0;
+let lastNudge = 0;
+let keepAliveTimer = null;
 
 let track = {
   id: '',
@@ -45,11 +49,14 @@ function setMiniPlaying(next) {
 const mediaTarget = {
   play() {
     pausedByUser = false;
+    wantPlaying = true;
+    lastAdvance = Date.now();
     setMiniPlaying(true);
     send({ event: 'command', func: 'playVideo', args: [] });
   },
   pause() {
     pausedByUser = true;
+    wantPlaying = false;
     pausedAt = Date.now();
     setMiniPlaying(false);
     send({ event: 'command', func: 'pauseVideo', args: [] });
@@ -58,6 +65,32 @@ const mediaTarget = {
     closeMini();
   },
 };
+
+/* Retry playVideo only while the app is backgrounded and playback is wanted.
+   This counteracts YouTube pausing a hidden embed without fighting a manual
+   pause from the notification or lock screen. */
+function nudgePlayback() {
+  if (!miniEl || !frame || isAppVisible() || !wantPlaying || pausedByUser) return;
+  const now = Date.now();
+  if (now - lastNudge < 3000 || now - lastAdvance < 3500) return;
+  lastNudge = now;
+  send({ event: 'command', func: 'playVideo', args: [] });
+}
+
+function onAppVisibility(event) {
+  const visible = !!event.detail?.visible;
+  if (visible) {
+    lastNudge = 0;
+    return;
+  }
+  if (pausedByUser || !frame) return;
+  const recentlyPlaying = wantPlaying || Date.now() - lastAdvance < 2500;
+  if (!recentlyPlaying) return;
+  wantPlaying = true;
+  lastAdvance = Date.now();
+  lastNudge = 0;
+  send({ event: 'command', func: 'playVideo', args: [] });
+}
 
 function save(force = false) {
   if (!track.id || !track.duration || !track.position) return;
@@ -118,7 +151,11 @@ function onMessage(event) {
     // Never re-send a pause from here; a stale tick after resume used to stop
     // playback again and again.
     const advancing = info.currentTime > track.position + 0.05;
-    if (advancing && !pausedByUser) setMiniPlaying(true);
+    if (advancing && !pausedByUser) {
+      wantPlaying = true;
+      lastAdvance = Date.now();
+      setMiniPlaying(true);
+    }
     track.position = info.currentTime;
     paintProgress();
     if (track.duration && track.position >= track.duration - 2) {
@@ -131,12 +168,20 @@ function onMessage(event) {
 
   if (info.playerState === 1) {
     pausedByUser = false;
+    wantPlaying = true;
+    lastAdvance = Date.now();
     setMiniPlaying(true);
   } else if (info.playerState === 0 || info.playerState === 2) {
     if (info.playerState === 0) {
+      wantPlaying = false;
       store.removeResume(track.id);
       closeMini({ savePosition: false });
       return;
+    }
+    if (!isAppVisible()) {
+      if (wantPlaying && !pausedByUser) lastAdvance = 0;
+    } else {
+      wantPlaying = false;
     }
     // Paused right now, but not necessarily paused by the user. Leave the flag
     // alone so a stale progress tick cannot be mistaken for a resume.
@@ -161,12 +206,16 @@ export function closeMini({ savePosition = true } = {}) {
   if (savePosition) save(true);
   clearTimeout(timer);
   timer = null;
+  clearInterval(keepAliveTimer);
+  keepAliveTimer = null;
+  wantPlaying = false;
   clearMediaTarget(mediaTarget);
   reportedPlaying = false;
   stopMedia();
   window.removeEventListener('message', onMessage);
   document.removeEventListener('visibilitychange', onHide);
   window.removeEventListener('pagehide', onPageHide);
+  window.removeEventListener('dinosour:appvisibility', onAppVisibility);
   miniEl.remove();
   miniEl = null;
   frame = null;
@@ -186,6 +235,9 @@ export function openMini(video) {
   };
   lastSave = 0;
   tries = 0;
+  wantPlaying = true;
+  lastAdvance = Date.now();
+  lastNudge = 0;
 
   miniEl = document.createElement('div');
   miniEl.className = 'mini-player';
@@ -237,5 +289,7 @@ export function openMini(video) {
   window.addEventListener('message', onMessage);
   document.addEventListener('visibilitychange', onHide);
   window.addEventListener('pagehide', onPageHide);
+  window.addEventListener('dinosour:appvisibility', onAppVisibility);
+  keepAliveTimer = setInterval(nudgePlayback, 2000);
   setMediaTarget(mediaTarget);
 }

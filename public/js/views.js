@@ -24,7 +24,7 @@ import {
 import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, timeAgo, APP_MODE } from './util.js';
 import { navigate, openMenu, openPrompt, toast } from './ui.js';
 import { searchYouTube, videoInfo } from './yt.js';
-import { clearMediaTarget, reportMedia, setMediaTarget } from './media.js';
+import { clearMediaTarget, isAppVisible, reportMedia, setMediaTarget } from './media.js';
 
 const icon = (name, cls = '') =>
   `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
@@ -1037,6 +1037,11 @@ export function mountRemoteWatch(root, id) {
   let pausedByUser = false;
   let pausedAt = 0;
   let started = false;
+  let wantPlaying = false;
+  let lastAdvance = Date.now();
+  let lastNudge = 0;
+  let keepAliveTimer = null;
+  let lastPlayerState = null;
 
   const endCard = playerEl?.querySelector('[data-yt-end]');
 
@@ -1074,6 +1079,8 @@ export function mountRemoteWatch(root, id) {
     play() {
       if (!playerEl) return;
       pausedByUser = false;
+      wantPlaying = true;
+      lastAdvance = Date.now();
       playing = true;
       syncMedia(true);
       if (!playerEl.classList.contains('playing')) startPlayback();
@@ -1081,6 +1088,7 @@ export function mountRemoteWatch(root, id) {
     },
     pause() {
       pausedByUser = true;
+      wantPlaying = false;
       pausedAt = Date.now();
       playing = false;
       syncMedia(false);
@@ -1088,6 +1096,7 @@ export function mountRemoteWatch(root, id) {
     },
     stop() {
       pausedByUser = true;
+      wantPlaying = false;
       pausedAt = Date.now();
       playing = false;
       syncMedia(false);
@@ -1095,6 +1104,36 @@ export function mountRemoteWatch(root, id) {
     },
   };
   setMediaTarget(mediaTarget);
+
+  /* YouTube likes to pause a hidden embed on its own. Retrying playVideo while
+     the app is backgrounded keeps audio going, but the retry is disabled in
+     the foreground and after a real user/native pause, so it can never fight
+     the pause button. */
+  const nudgePlayback = () => {
+    if (destroyed || !frame || isAppVisible() || !wantPlaying || pausedByUser) return;
+    const now = Date.now();
+    if (now - lastNudge < 3000 || now - lastAdvance < 3500) return;
+    lastNudge = now;
+    send({ event: 'command', func: 'playVideo', args: [] });
+  };
+
+  const onAppVisibility = (event) => {
+    const visible = !!event.detail?.visible;
+    if (visible) {
+      lastNudge = 0;
+      return;
+    }
+    if (pausedByUser || lastPlayerState === 0 || !frame) return;
+    // Resume on the way out when the video was rolling (or YouTube paused it
+    // just before the app was hidden). A pause that happened long ago is left
+    // alone, so leaving the app does not restart a video the user paused.
+    const recentlyPlaying = wantPlaying || playing || Date.now() - lastAdvance < 2500;
+    if (!recentlyPlaying) return;
+    wantPlaying = true;
+    lastAdvance = Date.now();
+    lastNudge = 0;
+    send({ event: 'command', func: 'playVideo', args: [] });
+  };
 
   const save = (force = false) => {
     if (destroyed || !duration || !position) return;
@@ -1176,6 +1215,8 @@ export function mountRemoteWatch(root, id) {
   const replay = () => {
     hideEndCard();
     endSuppressed = false;
+    wantPlaying = true;
+    lastAdvance = Date.now();
     store.removeResume(id);
     seekTo(0, false);
     send({ event: 'command', func: 'playVideo', args: [] });
@@ -1291,7 +1332,11 @@ export function mountRemoteWatch(root, id) {
       // Never re-send a pause here: YouTube can report a stale tick right after
       // a resume, and repeating the command used to pause the video forever.
       const advancing = info.currentTime > position + 0.05;
-      if (advancing && !pausedByUser) playing = true;
+      if (advancing && !pausedByUser) {
+        playing = true;
+        wantPlaying = true;
+        lastAdvance = Date.now();
+      }
       position = info.currentTime;
       // Don't wait for playerState: several videos omit it from infoDelivery.
       if (duration) {
@@ -1302,13 +1347,24 @@ export function mountRemoteWatch(root, id) {
     }
 
     const state = typeof info.playerState === 'number' ? info.playerState : null;
+    if (state !== null) lastPlayerState = state;
     if (state === 1) {
       // Playing again — either the user resumed inside the embed or playback
       // recovered on its own.
       pausedByUser = false;
       playing = true;
+      wantPlaying = true;
+      lastAdvance = Date.now();
     } else if (state === 0 || state === 2) {
       playing = false;
+      if (state === 0) wantPlaying = false;
+      else if (!isAppVisible()) {
+        if (wantPlaying && !pausedByUser) lastAdvance = 0;
+      } else {
+        // Paused in the foreground: remember that the user (or the player)
+        // is not expecting audio, so backgrounding will not restart it.
+        wantPlaying = false;
+      }
       // playerState 2 only means "paused right now". It must not be treated as
       // a new user pause, or the next manual resume gets overridden. A pause
       // requested from the notification/lock screen is already flagged in
@@ -1344,12 +1400,15 @@ export function mountRemoteWatch(root, id) {
     if (destroyed) return;
     save(true);
     destroyed = true;
+    wantPlaying = false;
     window.removeEventListener('message', onMessage);
     document.removeEventListener('visibilitychange', onHide);
     window.removeEventListener('pagehide', onPageHide);
+    window.removeEventListener('dinosour:appvisibility', onAppVisibility);
     clearTimeout(listenTimer);
     clearTimeout(seekTimer);
     clearInterval(endTimer);
+    clearInterval(keepAliveTimer);
     clearMediaTarget(mediaTarget);
     send({ event: 'command', func: 'pauseVideo', args: [] });
     frame = null;
@@ -1372,9 +1431,13 @@ export function mountRemoteWatch(root, id) {
   window.addEventListener('message', onMessage);
   document.addEventListener('visibilitychange', onHide);
   window.addEventListener('pagehide', onPageHide);
+  window.addEventListener('dinosour:appvisibility', onAppVisibility);
+  keepAliveTimer = setInterval(nudgePlayback, 2000);
 
   const startPlayback = () => {
     if (!playerEl || playerEl.classList.contains('playing')) return;
+    wantPlaying = true;
+    lastAdvance = Date.now();
     frame = document.createElement('iframe');
     frame.className = 'yt-frame';
     const startParam =

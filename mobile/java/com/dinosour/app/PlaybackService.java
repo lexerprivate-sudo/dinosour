@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.media.AudioAttributes;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
@@ -58,6 +59,12 @@ public class PlaybackService extends Service {
     }
 
     session = new MediaSession(this, "dinosour");
+    session.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS
+        | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
+    session.setPlaybackToLocal(new AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+        .build());
     session.setCallback(new MediaSession.Callback() {
       @Override
       public void onPlay() {
@@ -148,7 +155,8 @@ public class PlaybackService extends Service {
           .setActions(PlaybackState.ACTION_PLAY
               | PlaybackState.ACTION_PAUSE
               | PlaybackState.ACTION_PLAY_PAUSE
-              | PlaybackState.ACTION_STOP)
+              | PlaybackState.ACTION_STOP
+              | PlaybackState.ACTION_SEEK_TO)
           .setState(
               playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED,
               PlaybackState.PLAYBACK_POSITION_UNKNOWN,

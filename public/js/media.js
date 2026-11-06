@@ -3,8 +3,21 @@
 let target = null;
 let lastTitle = '';
 let lastChannel = '';
+let appVisible = true;
 
 const api = () => (typeof window !== 'undefined' ? window.Dinosour : null);
+
+export function isAppVisible() {
+  return appVisible;
+}
+
+/* MainActivity calls this when the app goes to the background or comes back.
+   YouTube can auto-pause a hidden embed, so the players use this signal to
+   retry playVideo only while the app is actually backgrounded. */
+export function setAppVisible(next) {
+  appVisible = !!next;
+  window.dispatchEvent(new CustomEvent('dinosour:appvisibility', { detail: { visible: appVisible } }));
+}
 
 /* The watch page or the mini player registers itself here so that lock-screen
    and notification buttons can reach whichever player is actually on. */

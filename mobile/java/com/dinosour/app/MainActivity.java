@@ -715,6 +715,19 @@ public class MainActivity extends Activity {
     });
   }
 
+  /** Tells the page whether the app is foregrounded, so hidden embeds can be
+      kept alive only while the user actually expects audio to continue. */
+  private void sendAppVisibility(final boolean visible) {
+    final WebView view = web;
+    if (view == null) return;
+    ui.post(() -> {
+      if (web == null) return;
+      view.evaluateJavascript(
+          "window.__dinosourAppVisible&&window.__dinosourAppVisible(" + visible + ")",
+          null);
+    });
+  }
+
   private JSONObject getJson(String url) throws Exception {
     HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
     conn.setConnectTimeout(8000);
@@ -793,6 +806,7 @@ public class MainActivity extends Activity {
   @Override
   protected void onPause() {
     resumed = false;
+    sendAppVisibility(false);
     // While audio is playing in the background, keep the page (and the embed) alive.
     if (web != null && !PlaybackService.RUNNING) web.onPause();
     super.onPause();
@@ -802,6 +816,7 @@ public class MainActivity extends Activity {
   protected void onResume() {
     super.onResume();
     resumed = true;
+    sendAppVisibility(true);
     if (web != null) web.onResume();
     if (pendingUpdate != null && pendingUpdate.exists() && installRequested && canInstallUpdates()) {
       installUpdate();
