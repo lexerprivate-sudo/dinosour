@@ -115,18 +115,10 @@ function onMessage(event) {
 
   if (typeof info.currentTime === 'number') {
     // Some embeds omit playerState, so advancing time also means "playing".
+    // Never re-send a pause from here; a stale tick after resume used to stop
+    // playback again and again.
     const advancing = info.currentTime > track.position + 0.05;
-    if (advancing) {
-      if (pausedByUser) {
-        // A pause sent before the player was ready can be lost; repeat it.
-        if (Date.now() - pausedAt >= 2500) {
-          pausedAt = Date.now();
-          send({ event: 'command', func: 'pauseVideo', args: [] });
-        }
-      } else {
-        setMiniPlaying(true);
-      }
-    }
+    if (advancing && !pausedByUser) setMiniPlaying(true);
     track.position = info.currentTime;
     paintProgress();
     if (track.duration && track.position >= track.duration - 2) {
@@ -138,22 +130,16 @@ function onMessage(event) {
   }
 
   if (info.playerState === 1) {
-    if (pausedByUser) {
-      if (Date.now() - pausedAt >= 2500) {
-        pausedAt = Date.now();
-        send({ event: 'command', func: 'pauseVideo', args: [] });
-      }
-    } else {
-      setMiniPlaying(true);
-    }
+    pausedByUser = false;
+    setMiniPlaying(true);
   } else if (info.playerState === 0 || info.playerState === 2) {
     if (info.playerState === 0) {
       store.removeResume(track.id);
       closeMini({ savePosition: false });
       return;
     }
-    pausedByUser = true;
-    pausedAt = Date.now();
+    // Paused right now, but not necessarily paused by the user. Leave the flag
+    // alone so a stale progress tick cannot be mistaken for a resume.
     setMiniPlaying(false);
   }
 }

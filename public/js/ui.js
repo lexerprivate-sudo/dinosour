@@ -116,3 +116,83 @@ export function openMenu(anchor, items) {
     window.removeEventListener('scroll', closeMenu, true);
   };
 }
+
+/* In-app text prompt. WebView has no window.prompt(), so playlist naming and
+   other small inputs use this instead. */
+let dialogEl = null;
+let dialogCleanup = null;
+
+export function closePrompt() {
+  if (!dialogEl) return;
+  dialogEl.remove();
+  dialogEl = null;
+  dialogCleanup?.();
+  dialogCleanup = null;
+}
+
+export function openPrompt({
+  title = 'New playlist',
+  label = 'Name',
+  placeholder = '',
+  value = '',
+  hint = '',
+  confirmText = 'Create',
+  onSubmit,
+} = {}) {
+  closePrompt();
+  const el = document.createElement('div');
+  el.className = 'dialog-scrim';
+  el.innerHTML = `<form class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+    <h2 id="dialogTitle">${escapeText(title)}</h2>
+    <label class="dialog-label" for="dialogInput">${escapeText(label)}</label>
+    <input class="dialog-input" id="dialogInput" maxlength="40" autocomplete="off" spellcheck="false">
+    <p class="dialog-hint" data-dialog-hint></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-outline" data-dialog-cancel>Cancel</button>
+      <button type="submit" class="btn-primary">${escapeText(confirmText)}</button>
+    </div>
+  </form>`;
+  document.body.append(el);
+  dialogEl = el;
+
+  const form = el.querySelector('form');
+  const input = el.querySelector('.dialog-input');
+  const hintEl = el.querySelector('[data-dialog-hint]');
+  input.placeholder = placeholder;
+  input.value = value;
+  hintEl.textContent = hint;
+
+  const close = () => closePrompt();
+
+  const onKey = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+    }
+  };
+
+  el.querySelector('[data-dialog-cancel]').addEventListener('click', close);
+  el.addEventListener('pointerdown', (event) => {
+    if (event.target === el) close();
+  });
+  document.addEventListener('keydown', onKey);
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const text = input.value.trim().replace(/\s+/g, ' ');
+    if (!text) {
+      hintEl.textContent = 'Please type a name first.';
+      hintEl.dataset.tone = 'err';
+      input.focus();
+      return;
+    }
+    close();
+    onSubmit?.(text);
+  });
+
+  dialogCleanup = () => document.removeEventListener('keydown', onKey);
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select();
+  });
+}

@@ -20,9 +20,42 @@ const defaults = {
   topics: [],
   resume: [],
   queue: [],
+  ytHistory: [],
+  ytLiked: [],
+  ytSaved: [],
+  playlists: [],
   ytRate: 1,
   ytQuality: 'auto',
 };
+
+/* YouTube items are stored with their metadata, because remote videos have no
+   local catalog record to look up later. */
+function ytEntry(video) {
+  if (!video || !video.id) return null;
+  const id = String(video.id);
+  return {
+    id,
+    title: String(video.title || 'YouTube video').slice(0, 220),
+    channel: String(video.channel || 'YouTube').slice(0, 120),
+    thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(id)}/mqdefault.jpg`,
+    length: String(video.length || ''),
+    at: Number(video.at) || Date.now(),
+  };
+}
+
+function ytUpsert(list, video, { stamp = true } = {}) {
+  const entry = ytEntry(video);
+  if (!entry) return list;
+  const index = list.findIndex((item) => item && item.id === entry.id);
+  if (index === -1) return [entry, ...list];
+  const prev = list[index];
+  // Keep a real title when a later write only has the loading placeholder.
+  if (entry.title === 'YouTube video' && prev.title) entry.title = prev.title;
+  if (!entry.channel && prev.channel) entry.channel = prev.channel;
+  if (!entry.length && prev.length) entry.length = prev.length;
+  entry.at = stamp ? Date.now() : prev.at;
+  return [entry, ...list.slice(0, index), ...list.slice(index + 1)];
+}
 
 function read() {
   try {
@@ -273,6 +306,171 @@ export const store = {
 
   clearQueue() {
     this.state.queue = [];
+    this.save();
+  },
+
+  /* ------------------------------------------------ YouTube library */
+
+  ytHistoryList() {
+    return Array.isArray(this.state.ytHistory)
+      ? this.state.ytHistory.filter((v) => v && v.id && v.title)
+      : [];
+  },
+
+  addYtHistory(video) {
+    const entry = ytEntry(video);
+    if (!entry) return null;
+    entry.at = Date.now();
+    const list = this.ytHistoryList();
+    const prev = list.find((v) => v.id === entry.id);
+    if (prev) {
+      if (entry.title === 'YouTube video' && prev.title) entry.title = prev.title;
+      if (!entry.channel && prev.channel) entry.channel = prev.channel;
+      if (!entry.length && prev.length) entry.length = prev.length;
+    }
+    const rest = list.filter((v) => v.id !== entry.id);
+    this.state.ytHistory = [entry, ...rest].slice(0, 200);
+    this.save();
+    return entry;
+  },
+
+  removeYtHistory(id) {
+    this.state.ytHistory = this.ytHistoryList().filter((v) => v.id !== id);
+    this.save();
+  },
+
+  clearYtHistory() {
+    this.state.ytHistory = [];
+    this.save();
+  },
+
+  isYtLiked(id) {
+    return this.ytLikedList().some((v) => v.id === id);
+  },
+
+  ytLikedList() {
+    return Array.isArray(this.state.ytLiked)
+      ? this.state.ytLiked.filter((v) => v && v.id && v.title)
+      : [];
+  },
+
+  toggleYtLike(video) {
+    if (!video?.id) return false;
+    const list = this.ytLikedList();
+    if (list.some((v) => v.id === video.id)) {
+      this.state.ytLiked = list.filter((v) => v.id !== video.id);
+      this.save();
+      return false;
+    }
+    this.state.ytLiked = ytUpsert(list, video);
+    this.save();
+    return true;
+  },
+
+  isYtSaved(id) {
+    return this.ytSavedList().some((v) => v.id === id);
+  },
+
+  ytSavedList() {
+    return Array.isArray(this.state.ytSaved)
+      ? this.state.ytSaved.filter((v) => v && v.id && v.title)
+      : [];
+  },
+
+  toggleYtSave(video) {
+    if (!video?.id) return false;
+    const list = this.ytSavedList();
+    if (list.some((v) => v.id === video.id)) {
+      this.state.ytSaved = list.filter((v) => v.id !== video.id);
+      this.save();
+      return false;
+    }
+    this.state.ytSaved = ytUpsert(list, video);
+    this.save();
+    return true;
+  },
+
+  playlistsList() {
+    return Array.isArray(this.state.playlists)
+      ? this.state.playlists.filter((p) => p && p.id && p.name)
+      : [];
+  },
+
+  playlistById(id) {
+    return this.playlistsList().find((p) => p.id === id) || null;
+  },
+
+  createPlaylist(name) {
+    const value = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!value) return null;
+    const list = this.playlistsList();
+    if (list.length >= 20) return null;
+    if (list.some((p) => p.name.toLowerCase() === value.toLowerCase())) return null;
+    const playlist = {
+      id: `pl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      name: value,
+      at: Date.now(),
+      items: [],
+    };
+    this.state.playlists = [...list, playlist];
+    this.save();
+    return playlist;
+  },
+
+  deletePlaylist(id) {
+    this.state.playlists = this.playlistsList().filter((p) => p.id !== id);
+    this.save();
+  },
+
+  inPlaylist(id, videoId) {
+    const playlist = this.playlistById(id);
+    return !!playlist?.items?.some((v) => v.id === videoId);
+  },
+
+  addToPlaylist(playlistId, video) {
+    const playlist = this.playlistById(playlistId);
+    if (!playlist || !video?.id) return false;
+    const items = Array.isArray(playlist.items) ? playlist.items : [];
+    if (items.some((v) => v.id === video.id)) return false;
+    const entry = ytEntry(video);
+    if (!entry) return false;
+    playlist.items = [entry, ...items].slice(0, 200);
+    playlist.at = Date.now();
+    this.save();
+    return true;
+  },
+
+  removeFromPlaylist(playlistId, videoId) {
+    const playlist = this.playlistById(playlistId);
+    if (!playlist) return false;
+    const items = Array.isArray(playlist.items) ? playlist.items : [];
+    if (!items.some((v) => v.id === videoId)) return false;
+    playlist.items = items.filter((v) => v.id !== videoId);
+    this.save();
+    return true;
+  },
+
+  /* Fill in real titles/metadata after /api/video catches up, without
+     disturbing whether an item is liked, saved or in a playlist. */
+  refreshYtItem(video) {
+    const entry = ytEntry(video);
+    if (!entry) return;
+    const merge = (item) => {
+      if (!item || item.id !== entry.id) return item;
+      return {
+        ...item,
+        title: entry.title === 'YouTube video' && item.title ? item.title : entry.title,
+        channel: entry.channel || item.channel,
+        thumb: entry.thumb || item.thumb,
+        length: entry.length || item.length || '',
+      };
+    };
+    this.state.ytLiked = this.ytLikedList().map(merge);
+    this.state.ytSaved = this.ytSavedList().map(merge);
+    this.state.playlists = this.playlistsList().map((playlist) => ({
+      ...playlist,
+      items: (Array.isArray(playlist.items) ? playlist.items : []).map(merge),
+    }));
     this.save();
   },
 };

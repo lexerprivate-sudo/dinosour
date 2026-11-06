@@ -649,6 +649,16 @@ public class MainActivity extends Activity {
         if (!resumed && web != null) web.onPause();
       });
     }
+
+    /** Settings → Clear cache. Leaves localStorage (history, likes, playlists) alone. */
+    @JavascriptInterface
+    public void clearCache() {
+      ui.post(() -> {
+        if (web == null) return;
+        web.clearCache(true);
+        web.clearFormData();
+      });
+    }
   }
 
   private void startMedia(boolean playing, String title, String channel) {

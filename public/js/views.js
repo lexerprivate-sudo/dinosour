@@ -22,7 +22,7 @@ import {
   verifiedIcon,
 } from './components.js';
 import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, timeAgo, APP_MODE } from './util.js';
-import { navigate, openMenu, toast } from './ui.js';
+import { navigate, openMenu, openPrompt, toast } from './ui.js';
 import { searchYouTube, videoInfo } from './yt.js';
 import { clearMediaTarget, reportMedia, setMediaTarget } from './media.js';
 
@@ -782,7 +782,7 @@ export async function mountResults(root, query) {
   await load(false);
 }
 
-function ytCardHtml(v) {
+function ytCardHtml(v, extra = '') {
   const channel = v.channel || 'YouTube';
   const meta = [v.viewsText, v.publishedText].filter(Boolean).join(' · ');
   return `<article class="card yt-card">
@@ -799,6 +799,7 @@ function ytCardHtml(v) {
       <div class="card-channel"><span class="name">${esc(channel)}</span></div>
       ${meta ? `<div class="card-meta">${esc(meta)}</div>` : ''}
     </div>
+    ${extra}
   </div>
 </article>`;
 }
@@ -904,6 +905,8 @@ export function renderRemoteWatch(id, info = null) {
 
   const queue = store.queueList();
   const autoplay = !!store.state.autoplay;
+  const liked = store.isYtLiked(id);
+  const savedYt = store.isYtSaved(id);
 
   return `<div class="watch yt-watch">
     <div class="watch-main">
@@ -951,6 +954,9 @@ export function renderRemoteWatch(id, info = null) {
         <div class="watch-actions">
           <button class="action-btn" type="button" data-yt-rate title="Playback speed">${icon('gauge')} <span data-yt-rate-label>${rate}×</span></button>
           <button class="action-btn" type="button" data-yt-quality title="Video quality">${icon('hd')} <span data-yt-quality-label>${esc(quality)}</span></button>
+          <button class="action-btn ${liked ? 'liked' : ''}" type="button" data-yt-like aria-pressed="${liked}">${icon('thumb-up')} <span data-yt-like-label>${liked ? 'Liked' : 'Like'}</span></button>
+          <button class="action-btn ${savedYt ? 'active' : ''}" type="button" data-yt-save aria-pressed="${savedYt}">${icon(savedYt ? 'check' : 'save')} <span data-yt-save-label>${savedYt ? 'Saved' : 'Watch later'}</span></button>
+          <button class="action-btn" type="button" data-yt-playlist>${icon('plus')} Playlist</button>
           <a class="action-btn" href="https://www.youtube.com/watch?v=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">${icon('play')} Open on YouTube</a>
           <button class="action-btn" data-copy-remote>${icon('share')} Copy link</button>
         </div>
@@ -1030,6 +1036,7 @@ export function mountRemoteWatch(root, id) {
   let reportedPlaying = false;
   let pausedByUser = false;
   let pausedAt = 0;
+  let started = false;
 
   const endCard = playerEl?.querySelector('[data-yt-end]');
 
@@ -1095,6 +1102,14 @@ export function mountRemoteWatch(root, id) {
     if (!force && now - lastSave < 5000) return;
     lastSave = now;
     store.saveResume({ ...meta, id, t: position, d: duration });
+  };
+
+  /* Recently watched. Only real playback counts, not opening the page. */
+  const remember = () => {
+    if (!started) return;
+    const entry = { ...meta, id, length: meta.length || (duration ? fmtDuration(duration) : '') };
+    store.addYtHistory(entry);
+    store.refreshYtItem(entry);
   };
 
   const seekTo = (time, announce) => {
@@ -1262,6 +1277,10 @@ export function mountRemoteWatch(root, id) {
     // duration is reliable in initialDelivery; some videos only send time later
     if (typeof info.duration === 'number' && info.duration > 0) {
       duration = info.duration;
+      if (!meta.length) {
+        meta.length = fmtDuration(duration);
+        remember();
+      }
     } else {
       const seconds = Number(info.videoData?.videoDetails?.lengthSeconds);
       if (Number.isFinite(seconds) && seconds > 0) duration = seconds;
@@ -1269,18 +1288,10 @@ export function mountRemoteWatch(root, id) {
 
     if (typeof info.currentTime === 'number') {
       // Some embeds omit playerState, so advancing time also means "playing".
+      // Never re-send a pause here: YouTube can report a stale tick right after
+      // a resume, and repeating the command used to pause the video forever.
       const advancing = info.currentTime > position + 0.05;
-      if (advancing) {
-        if (pausedByUser) {
-          // A pause sent before the player was ready can be lost; repeat it.
-          if (Date.now() - pausedAt >= 2500) {
-            pausedAt = Date.now();
-            send({ event: 'command', func: 'pauseVideo', args: [] });
-          }
-        } else {
-          playing = true;
-        }
-      }
+      if (advancing && !pausedByUser) playing = true;
       position = info.currentTime;
       // Don't wait for playerState: several videos omit it from infoDelivery.
       if (duration) {
@@ -1292,20 +1303,16 @@ export function mountRemoteWatch(root, id) {
 
     const state = typeof info.playerState === 'number' ? info.playerState : null;
     if (state === 1) {
-      if (pausedByUser) {
-        if (Date.now() - pausedAt >= 2500) {
-          pausedAt = Date.now();
-          send({ event: 'command', func: 'pauseVideo', args: [] });
-        }
-      } else {
-        playing = true;
-      }
+      // Playing again — either the user resumed inside the embed or playback
+      // recovered on its own.
+      pausedByUser = false;
+      playing = true;
     } else if (state === 0 || state === 2) {
       playing = false;
-      if (state === 2) {
-        pausedByUser = true;
-        pausedAt = Date.now();
-      }
+      // playerState 2 only means "paused right now". It must not be treated as
+      // a new user pause, or the next manual resume gets overridden. A pause
+      // requested from the notification/lock screen is already flagged in
+      // mediaTarget.pause() and is cleared by state 1.
     }
 
     if (state === 2) save(true);
@@ -1381,6 +1388,8 @@ export function mountRemoteWatch(root, id) {
     // keep the end screen mounted above the iframe
     if (endCard) playerEl.append(endCard);
     playerEl.classList.add('playing');
+    started = true;
+    remember();
     frame.addEventListener('load', () => {
       listenTries = 0;
       listen();
@@ -1444,6 +1453,68 @@ export function mountRemoteWatch(root, id) {
   });
 
   paintPrefs();
+
+  const likeBtn = root.querySelector('[data-yt-like]');
+  likeBtn?.addEventListener('click', () => {
+    const on = store.toggleYtLike({ ...meta, id, length: meta.length || '' });
+    likeBtn.classList.toggle('liked', on);
+    likeBtn.setAttribute('aria-pressed', String(on));
+    const label = root.querySelector('[data-yt-like-label]');
+    if (label) label.textContent = on ? 'Liked' : 'Like';
+    toast(on ? 'Added to Liked videos' : 'Removed from Liked videos');
+  });
+
+  const saveBtn = root.querySelector('[data-yt-save]');
+  saveBtn?.addEventListener('click', () => {
+    const on = store.toggleYtSave({ ...meta, id, length: meta.length || '' });
+    saveBtn.classList.toggle('active', on);
+    saveBtn.setAttribute('aria-pressed', String(on));
+    saveBtn.innerHTML = `${icon(on ? 'check' : 'save')} <span data-yt-save-label>${on ? 'Saved' : 'Watch later'}</span>`;
+    toast(on ? 'Saved to Watch later' : 'Removed from Watch later');
+  });
+
+  root.querySelector('[data-yt-playlist]')?.addEventListener('click', (event) => {
+    const button = event.currentTarget;
+    const current = { ...meta, id, length: meta.length || '' };
+    const items = store.playlistsList().map((playlist) => ({
+      key: `playlist-${playlist.id}`,
+      icon: store.inPlaylist(playlist.id, id) ? 'check' : 'plus',
+      label: `${store.inPlaylist(playlist.id, id) ? 'Remove from' : 'Add to'} ${playlist.name}`,
+      onClick: () => {
+        if (store.inPlaylist(playlist.id, id)) {
+          store.removeFromPlaylist(playlist.id, id);
+          toast(`Removed from ${playlist.name}`);
+        } else {
+          store.addToPlaylist(playlist.id, current);
+          toast(`Added to ${playlist.name}`);
+        }
+      },
+    }));
+    if (items.length) items.push({ sep: true });
+    items.push({
+      key: 'new-playlist',
+      icon: 'plus',
+      label: 'New playlist…',
+      onClick: () => {
+        openPrompt({
+          title: 'New playlist',
+          label: 'Playlist name',
+          placeholder: 'Music, Watch later, Road trip…',
+          confirmText: 'Create',
+          onSubmit: (name) => {
+            const playlist = store.createPlaylist(name);
+            if (!playlist) {
+              toast('A playlist with that name already exists');
+              return;
+            }
+            store.addToPlaylist(playlist.id, current);
+            toast(`Created “${playlist.name}” and added this video`);
+          },
+        });
+      },
+    });
+    openMenu(button, items);
+  });
 
   rateBtn?.addEventListener('click', () => {
     const current = currentRate();
@@ -1514,6 +1585,7 @@ export function mountRemoteWatch(root, id) {
       const titleEl = root.querySelector('[data-yt-title]');
       if (titleEl) titleEl.textContent = info.title;
       document.title = `${info.title} — dinosour`;
+      remember();
 
       const metaEl = root.querySelector('[data-yt-meta]');
       const infoMeta = remoteMeta(info);
@@ -1571,7 +1643,9 @@ function resultItemHtml(v) {
 
 /* ============================================================ library */
 
-export function renderLibrary(kind) {
+export function renderLibrary(kind, playlistId = '') {
+  if (kind === 'playlists') return renderPlaylistsPage();
+  if (kind === 'playlist') return renderPlaylistPage(playlistId);
   if (kind === 'history') return renderHistory();
   if (kind === 'liked') return renderGridPage('liked');
   return renderGridPage('watch-later');
@@ -1582,6 +1656,7 @@ function libraryTabs(active) {
     ['history', 'History', '/feed/history'],
     ['watch-later', 'Watch later', '/feed/watch-later'],
     ['liked', 'Liked', '/feed/liked'],
+    ['playlists', 'Playlists', '/feed/playlists'],
   ];
   return `<nav class="library-tabs" aria-label="Library">${tabs
     .map(
@@ -1591,12 +1666,28 @@ function libraryTabs(active) {
     .join('')}</nav>`;
 }
 
+function ytHistoryRowHtml(v) {
+  return `<div class="history-row" data-yt-history-id="${esc(v.id)}">
+    <a href="/watch/yt/${encodeURIComponent(v.id)}" data-link class="thumb">
+      <img src="${esc(v.thumb)}" alt="" loading="lazy">
+      ${v.length ? `<span class="duration">${esc(v.length)}</span>` : ''}
+    </a>
+    <a href="/watch/yt/${encodeURIComponent(v.id)}" data-link class="history-info">
+      <div class="history-title">${esc(v.title)}</div>
+      <div class="history-sub">${esc(v.channel || 'YouTube')}</div>
+      <div class="history-sub">Watched ${timeAgo(new Date(v.at || Date.now()).toISOString())}</div>
+    </a>
+    <button class="icon-btn" data-remove-yt-history="${esc(v.id)}" aria-label="Remove from history">${icon('x')}</button>
+  </div>`;
+}
+
 function renderHistory() {
+  const ytRows = store.ytHistoryList();
   const rows = store.state.history
     .map((h) => ({ video: videoById(h.id), at: h.at }))
     .filter((x) => x.video);
 
-  if (!rows.length) {
+  if (!ytRows.length && !rows.length) {
     return `<div class="page">${libraryTabs('history')}${emptyState({
       iconName: 'history',
       title: 'No watch history',
@@ -1613,31 +1704,39 @@ function renderHistory() {
       <span class="spacer"></span>
       <button class="action-btn" data-clear-history>${icon('trash')} Clear all history</button>
     </div>
-    <div data-history-list>
-      ${rows
-        .map(({ video: v, at }) => {
-          const ch = v.channelData;
-          return `<div class="history-row" data-history-id="${v.id}">
-            <a href="/watch/${v.id}" data-link class="thumb">
-              <img src="${esc(v.thumb)}" alt="" loading="lazy">
-              <span class="duration">${fmtDuration(v.duration)}</span>
-            </a>
-            <a href="/watch/${v.id}" data-link class="history-info">
-              <div class="history-title">${esc(v.title)}</div>
-              <div class="history-sub">${esc(ch.name)} &middot; ${compact(v.views)} views</div>
-              <div class="history-sub">Watched ${timeAgo(new Date(at).toISOString())}</div>
-            </a>
-            <button class="icon-btn" data-remove-history="${v.id}" aria-label="Remove from history">${icon('x')}</button>
-          </div>`;
-        })
-        .join('')}
-    </div>
+    ${ytRows.length ? `<div data-yt-history-list>${ytRows.map(ytHistoryRowHtml).join('')}</div>` : ''}
+    ${
+      rows.length
+        ? `<h2 class="library-subhead">From the film library</h2>
+          <div data-history-list>
+            ${rows
+              .map(({ video: v, at }) => {
+                const ch = v.channelData;
+                return `<div class="history-row" data-history-id="${v.id}">
+                  <a href="/watch/${v.id}" data-link class="thumb">
+                    <img src="${esc(v.thumb)}" alt="" loading="lazy">
+                    <span class="duration">${fmtDuration(v.duration)}</span>
+                  </a>
+                  <a href="/watch/${v.id}" data-link class="history-info">
+                    <div class="history-title">${esc(v.title)}</div>
+                    <div class="history-sub">${esc(ch.name)} &middot; ${compact(v.views)} views</div>
+                    <div class="history-sub">Watched ${timeAgo(new Date(at).toISOString())}</div>
+                  </a>
+                  <button class="icon-btn" data-remove-history="${v.id}" aria-label="Remove from history">${icon('x')}</button>
+                </div>`;
+              })
+              .join('')}
+          </div>`
+        : ''
+    }
   </div>`;
 }
 
 function renderGridPage(kind) {
   const ids = kind === 'liked' ? store.likedIds() : store.savedIds();
   const videos = ids.map((id) => videoById(id)).filter(Boolean);
+  const ytVideos = kind === 'liked' ? store.ytLikedList() : store.ytSavedList();
+  const total = ytVideos.length + videos.length;
   const meta = {
     liked: {
       title: 'Liked videos',
@@ -1654,8 +1753,11 @@ function renderGridPage(kind) {
       emptyAction: 'Browse home',
     },
   }[kind];
+  const removeAttr = kind === 'liked' ? 'data-remove-yt-liked' : 'data-remove-yt-saved';
+  const removeButton = (v) =>
+    `<button class="icon-btn card-remove" type="button" ${removeAttr}="${esc(v.id)}" aria-label="Remove from ${meta.title}" title="Remove">${icon('x')}</button>`;
 
-  if (!videos.length) {
+  if (!total) {
     return `<div class="page">${libraryTabs(kind)}${emptyState({
       iconName: meta.icon === 'thumb-up' ? 'thumb-up' : meta.icon,
       title: meta.emptyTitle,
@@ -1668,13 +1770,114 @@ function renderGridPage(kind) {
   return `${libraryTabs(kind)}<div class="page-head" style="padding:24px 24px 0;max-width:1400px;margin:0 auto">
       <h1>${icon(meta.icon)} ${meta.title}</h1>
       <span class="spacer"></span>
-      <span class="page-count">${videos.length} video${videos.length === 1 ? '' : 's'}</span>
+      <span class="page-count">${total} video${total === 1 ? '' : 's'}</span>
     </div>
-    <div class="grid">${videos.map(cardHtml).join('')}</div>`;
+    <div class="grid">${ytVideos.map((v) => ytCardHtml(v, removeButton(v))).join('')}${videos
+      .map(cardHtml)
+      .join('')}</div>`;
 }
 
-export function mountLibrary(root, kind) {
-  if (kind !== 'history') return {};
+function renderPlaylistsPage() {
+  const playlists = store.playlistsList();
+  const head = `<div class="page-head">
+      <h1>${icon('music')} Playlists</h1>
+      <span class="spacer"></span>
+      <button class="action-btn" data-new-playlist>${icon('plus')} New playlist</button>
+    </div>`;
+
+  if (!playlists.length) {
+    return `<div class="page">${libraryTabs('playlists')}${head}${emptyState({
+      iconName: 'music',
+      title: 'No playlists yet',
+      text: 'Make your own lists — Music, Road trip, anything. They stay on this device.',
+      actionHref: '/',
+      actionText: 'Browse videos',
+    })}</div>`;
+  }
+
+  return `<div class="page">${libraryTabs('playlists')}${head}
+    <div class="playlist-grid">
+      ${playlists
+        .map((p) => {
+          const items = Array.isArray(p.items) ? p.items : [];
+          const cover = items[0]?.thumb;
+          return `<a class="playlist-card" href="/feed/playlist/${encodeURIComponent(p.id)}" data-link>
+            <span class="playlist-cover"${cover ? ` style="background-image:url('${esc(cover)}')"` : ''}>
+              ${cover ? '' : icon('music')}
+              <span class="playlist-count">${items.length}</span>
+            </span>
+            <span class="playlist-name">${esc(p.name)}</span>
+            <span class="playlist-sub">${items.length} video${items.length === 1 ? '' : 's'}</span>
+          </a>`;
+        })
+        .join('')}
+    </div>
+  </div>`;
+}
+
+function renderPlaylistPage(playlistId) {
+  const playlist = store.playlistById(playlistId);
+  if (!playlist) {
+    return `<div class="page">${libraryTabs('playlists')}${emptyState({
+      iconName: 'music',
+      title: 'Playlist not found',
+      text: 'It may have been deleted.',
+      actionHref: '/feed/playlists',
+      actionText: 'Back to playlists',
+    })}</div>`;
+  }
+
+  const items = Array.isArray(playlist.items) ? playlist.items : [];
+  const removeButton = (v) =>
+    `<button class="icon-btn card-remove" type="button" data-playlist-remove="${esc(v.id)}" data-playlist-id="${esc(
+      playlist.id
+    )}" aria-label="Remove from ${esc(playlist.name)}" title="Remove">${icon('x')}</button>`;
+
+  return `<div class="page">${libraryTabs('playlists')}
+    <div class="page-head">
+      <a class="icon-btn" href="/feed/playlists" data-link aria-label="Back to playlists">${icon('arrow-left')}</a>
+      <h1>${icon('music')} ${esc(playlist.name)}</h1>
+      <span class="spacer"></span>
+      <span class="page-count">${items.length} video${items.length === 1 ? '' : 's'}</span>
+      <button class="action-btn" data-delete-playlist="${esc(playlist.id)}">${icon('trash')} Delete</button>
+    </div>
+    ${
+      items.length
+        ? `<div class="grid">${items.map((v) => ytCardHtml(v, removeButton(v))).join('')}</div>`
+        : emptyState({
+            iconName: 'music',
+            title: 'This playlist is empty',
+            text: 'Open any YouTube video and choose Playlist to add it.',
+            actionHref: '/',
+            actionText: 'Browse videos',
+          })
+    }
+  </div>`;
+}
+
+export function mountLibrary(root, kind, playlistId = '') {
+  const rerender = () => window.dispatchEvent(new PopStateEvent('popstate'));
+
+  const createPlaylist = () => {
+    openPrompt({
+      title: 'New playlist',
+      label: 'Playlist name',
+      placeholder: 'Music, Road trip, Watch later…',
+      confirmText: 'Create',
+      onSubmit: (name) => {
+        const playlist = store.createPlaylist(name);
+        if (!playlist) {
+          toast('A playlist with that name already exists');
+          return;
+        }
+        toast(`Created “${playlist.name}”`);
+        navigate(`/feed/playlist/${encodeURIComponent(playlist.id)}`);
+      },
+    });
+  };
+
+  root.querySelector('[data-new-playlist]')?.addEventListener('click', createPlaylist);
+
   const clear = root.querySelector('[data-clear-history]');
   clear?.addEventListener('click', () => {
     openMenu(clear, [
@@ -1683,23 +1886,92 @@ export function mountLibrary(root, kind) {
         icon: 'trash',
         label: 'Clear all watch history',
         onClick: () => {
+          store.clearYtHistory();
           store.clearHistory();
+          store.clearResume();
           toast('Watch history cleared');
-          navigate('/feed/history', { replace: true });
+          rerender();
         },
       },
     ]);
   });
-  root.querySelector('[data-history-list]')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-remove-history]');
-    if (!btn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    store.removeHistory(btn.dataset.removeHistory);
-    btn.closest('.history-row')?.remove();
-    toast('Removed from history');
-    if (!root.querySelector('.history-row')) navigate('/feed/history', { replace: true });
+
+  const deleteBtn = root.querySelector('[data-delete-playlist]');
+  deleteBtn?.addEventListener('click', () => {
+    const id = deleteBtn.dataset.deletePlaylist;
+    const playlist = store.playlistById(id);
+    openMenu(deleteBtn, [
+      {
+        key: 'delete',
+        icon: 'trash',
+        label: `Delete “${playlist?.name || 'playlist'}”`,
+        onClick: () => {
+          store.deletePlaylist(id);
+          toast('Playlist deleted');
+          navigate('/feed/playlists', { replace: true });
+        },
+      },
+    ]);
   });
+
+  root.addEventListener('click', (event) => {
+    const ytHistory = event.target.closest('[data-remove-yt-history]');
+    if (ytHistory) {
+      event.preventDefault();
+      event.stopPropagation();
+      store.removeYtHistory(ytHistory.dataset.removeYtHistory);
+      store.removeResume(ytHistory.dataset.removeYtHistory);
+      ytHistory.closest('.history-row')?.remove();
+      toast('Removed from history');
+      if (!root.querySelector('.history-row')) rerender();
+      return;
+    }
+
+    const localHistory = event.target.closest('[data-remove-history]');
+    if (localHistory) {
+      event.preventDefault();
+      event.stopPropagation();
+      store.removeHistory(localHistory.dataset.removeHistory);
+      localHistory.closest('.history-row')?.remove();
+      toast('Removed from history');
+      if (!root.querySelector('.history-row')) rerender();
+      return;
+    }
+
+    const liked = event.target.closest('[data-remove-yt-liked]');
+    if (liked) {
+      event.preventDefault();
+      event.stopPropagation();
+      const item = store.ytLikedList().find((v) => v.id === liked.dataset.removeYtLiked);
+      if (item) store.toggleYtLike(item);
+      toast('Removed from Liked videos');
+      rerender();
+      return;
+    }
+
+    const saved = event.target.closest('[data-remove-yt-saved]');
+    if (saved) {
+      event.preventDefault();
+      event.stopPropagation();
+      const item = store.ytSavedList().find((v) => v.id === saved.dataset.removeYtSaved);
+      if (item) store.toggleYtSave(item);
+      toast('Removed from Watch later');
+      rerender();
+      return;
+    }
+
+    const playlistRemove = event.target.closest('[data-playlist-remove]');
+    if (playlistRemove) {
+      event.preventDefault();
+      event.stopPropagation();
+      store.removeFromPlaylist(playlistRemove.dataset.playlistId, playlistRemove.dataset.playlistRemove);
+      toast('Removed from playlist');
+      rerender();
+    }
+  });
+
+  void kind;
+  void playlistId;
   return {};
 }
 
@@ -1836,6 +2108,21 @@ export function renderSettings() {
         <button type="button" class="btn-outline" data-install-update hidden>${icon('download')} Install update</button>
       </div>
       <p class="settings-status" data-update-status role="status"></p>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2>Your data</h2>
+          <p>Watch history and cached files stay on this device. Likes, Watch later and playlists are kept when you clear history.</p>
+        </div>
+        <span class="settings-badge" data-history-count>${store.ytHistoryList().length} watched</span>
+      </div>
+      <div class="settings-actions">
+        <button type="button" class="btn-outline" data-clear-watch-history>${icon('trash')} Clear watch history</button>
+        <button type="button" class="btn-outline" data-clear-cache>${icon('refresh')} Clear cache</button>
+      </div>
+      <p class="settings-status" data-clear-status role="status"></p>
     </section>
 
     <section class="settings-card">

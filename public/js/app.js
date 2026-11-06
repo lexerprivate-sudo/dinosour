@@ -71,6 +71,7 @@ const NAV = [
   { key: 'history', href: '/feed/history', label: 'History', icon: 'history' },
   { key: 'watch-later', href: '/feed/watch-later', label: 'Watch later', icon: 'clock' },
   { key: 'liked', href: '/feed/liked', label: 'Liked videos', icon: 'thumb-up' },
+  { key: 'playlists', href: '/feed/playlists', label: 'Playlists', icon: 'music' },
 ];
 
 function buildSidebar() {
@@ -81,14 +82,26 @@ function buildSidebar() {
   $('#sidebarInner').innerHTML = html;
 }
 
-/* The standalone app has no local library, so drop those destinations and
-   replace them with Settings (updates, topics, appearance). */
+/* The standalone app uses the same library destinations now that they read
+   YouTube data. On the mobile bar, History and Watch later both live behind
+   Library, so swap History for Settings to keep five tabs. */
 function pruneAppNav() {
   if (!APP_MODE) return;
-  $$('[data-nav="history"], [data-nav="watch-later"], [data-nav="liked"]').forEach((el) => el.remove());
-  $$('#sidebarInner .nav-divider').forEach((el) => {
-    if (!el.nextElementSibling) el.remove();
-  });
+
+  const mobile = document.querySelector('.mobile-nav');
+  mobile?.querySelector('[data-nav="history"]')?.remove();
+  const library = mobile?.querySelector('[data-nav="watch-later"]');
+  if (library) {
+    library.href = '/feed/watch-later';
+    const label = library.querySelector('span');
+    if (label) label.textContent = 'Library';
+  }
+  if (mobile && !mobile.querySelector('[data-nav="settings"]')) {
+    mobile.insertAdjacentHTML(
+      'beforeend',
+      `<a href="/settings" data-link class="mobile-nav-item" data-nav="settings">${icon('sliders')}<span>Settings</span></a>`
+    );
+  }
 
   const sidebar = $('#sidebarInner');
   if (sidebar && !sidebar.querySelector('[data-nav="settings"]')) {
@@ -97,14 +110,6 @@ function pruneAppNav() {
       `<div class="nav-divider"></div><a class="nav-item" href="/settings" data-link data-nav="settings">${icon(
         'sliders'
       )}<span>Settings</span></a>`
-    );
-  }
-
-  const mobile = document.querySelector('.mobile-nav');
-  if (mobile && !mobile.querySelector('[data-nav="settings"]')) {
-    mobile.insertAdjacentHTML(
-      'beforeend',
-      `<a href="/settings" data-link class="mobile-nav-item" data-nav="settings">${icon('sliders')}<span>Settings</span></a>`
     );
   }
 
@@ -707,6 +712,49 @@ function mountSettings(root) {
     });
   });
 
+  root.querySelector('[data-clear-watch-history]')?.addEventListener('click', () => {
+    store.clearYtHistory();
+    store.clearHistory();
+    store.clearResume();
+    const count = root.querySelector('[data-history-count]');
+    if (count) count.textContent = '0 watched';
+    const status = root.querySelector('[data-clear-status]');
+    if (status) {
+      status.textContent = 'Watch history cleared. Likes, Watch later and playlists are still here.';
+      status.dataset.tone = 'ok';
+    }
+    toast('Watch history cleared');
+  });
+
+  root.querySelector('[data-clear-cache]')?.addEventListener('click', async () => {
+    let cleared = false;
+    try {
+      if (window.Dinosour?.clearCache) {
+        window.Dinosour.clearCache();
+        cleared = true;
+      }
+    } catch {
+      /* bridge unavailable */
+    }
+    try {
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((key) => caches.delete(key)));
+        if (keys.length) cleared = true;
+      }
+    } catch {
+      /* Cache Storage may be blocked */
+    }
+    const status = root.querySelector('[data-clear-status]');
+    if (status) {
+      status.textContent = cleared
+        ? 'Cache cleared. Your library, settings and history were kept.'
+        : 'There is no cached data to clear.';
+      status.dataset.tone = 'ok';
+    }
+    toast('Cache cleared');
+  });
+
   refreshChipsInPlace();
 }
 
@@ -716,6 +764,7 @@ const TITLES = {
   history: 'Watch history',
   'watch-later': 'Watch later',
   liked: 'Liked videos',
+  playlists: 'Playlists',
 };
 
 function renderRoute() {
@@ -805,21 +854,24 @@ function renderRoute() {
       searchInput.value = q;
       searchClear.hidden = !q;
     }
+  } else if (seg[0] === 'feed' && seg[1] === 'playlists') {
+    html = renderLibrary('playlists');
+    mount = () => {
+      mountLibrary(view, 'playlists');
+    };
+    title = 'Playlists';
+  } else if (seg[0] === 'feed' && seg[1] === 'playlist' && seg[2]) {
+    html = renderLibrary('playlist', seg[2]);
+    mount = () => {
+      mountLibrary(view, 'playlist', seg[2]);
+    };
+    title = store.playlistById(seg[2])?.name || 'Playlist';
   } else if (seg[0] === 'feed' && seg[1] && TITLES[seg[1]]) {
-    if (APP_MODE) {
-      // The standalone app has no local film library; send these old links home.
-      html = renderHome({ topic: 'All' });
-      mount = () => {
-        mountHome(view, 'All');
-      };
-      title = '';
-    } else {
-      html = renderLibrary(seg[1]);
-      mount = () => {
-        mountLibrary(view, seg[1]);
-      };
-      title = TITLES[seg[1]];
-    }
+    html = renderLibrary(seg[1]);
+    mount = () => {
+      mountLibrary(view, seg[1]);
+    };
+    title = TITLES[seg[1]];
   } else if (seg[0] === 'feed' && seg[1] === 'trending') {
     const topics = store.customTopics();
     const requested = url.searchParams.get('c') || 'All';
@@ -867,9 +919,14 @@ function updateActiveNav(seg) {
   else if (seg[0] === 'settings') key = 'settings';
   else if (seg[0] === 'results') key = 'search';
   else if (seg[0] === 'feed') {
-    key = seg[1] === 'trending' ? 'trending' : seg[1] === 'liked' ? 'watch-later' : seg[1];
+    key = seg[1] === 'trending' ? 'trending' : seg[1] === 'playlist' ? 'playlists' : seg[1];
   }
   $$('[data-nav]').forEach((el) => el.classList.toggle('active', el.dataset.nav === key));
+  // The phone bar has one Library tab covering all /feed library pages.
+  const libraryPage = ['history', 'watch-later', 'liked', 'playlists'].includes(key);
+  if (libraryPage) {
+    document.querySelector('.mobile-nav [data-nav="watch-later"]')?.classList.add('active');
+  }
 }
 
 // The bottom bar's Search tab brings the (already visible) search field into focus.

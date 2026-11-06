@@ -30,6 +30,8 @@ Then open <http://localhost:3000>.
   left, and a one-tap **Start over**.
 - **Playback controls** — speed from 0.5× to 2× and a quality preference
   (YouTube still controls the final adaptive quality), remembered on the device.
+- **Stable playback** — a stale progress tick can no longer re-apply an old pause
+  after you resume, so videos keep playing unless you pause them yourself.
 - **Up Next & autoplay** — tap **+** on any related video to queue it. When a video
   ends, an end screen shows what plays next and counts down instead of stopping,
   with **Play now**, **Replay** and **Cancel**. Autoplay can be switched off, and
@@ -44,7 +46,11 @@ Then open <http://localhost:3000>.
 - **Your topics** — the home chips are whatever you add: type a topic and it
   becomes an endless YouTube feed. No fixed categories. The same chips appear on
   **Trending**, where a topic shows the popular videos for it.
-- **Library** — watch history, liked videos, and watch later, stored on your machine.
+- **App library** — recently watched YouTube videos, liked videos, Watch later and
+  your own playlists (Music, Road trip, anything). Everything is stored on the
+  device, needs no account, and survives app updates.
+- **Settings** — clear watch history or the WebView cache independently; likes,
+  Watch later and playlists are kept. Automatic update checks live here too.
 - **Channel pages** — no subscribe buttons anywhere, by design.
 - **Light and dark themes**, collapsible sidebar, theater mode, keyboard shortcuts.
 
@@ -71,8 +77,9 @@ Requirements: **Node.js 20 or newer**. That's it.
 The default port is `3000`. If it is taken, the server walks up to the next free
 port and prints the URL it picked. You can force one with `PORT=8123 npm run serve`.
 
-Your watch history, likes, saved videos and preferences live in `localStorage`
-under the key `dinosour.v1` (data from `watch.v1` and `tot.v1` is migrated once,
+Your watch history, likes, saved videos, YouTube library (history, likes,
+Watch later, playlists) and preferences live in `localStorage` under the key
+`dinosour.v1` (data from `watch.v1` and `tot.v1` is migrated once,
 automatically). Deleting that key resets the app; nothing leaves the machine.
 
 ## How search works
