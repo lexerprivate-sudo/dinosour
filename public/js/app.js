@@ -1000,18 +1000,13 @@ function renderRoute() {
     };
     title = TITLES[seg[1]];
   } else if (seg[0] === 'feed' && seg[1] === 'trending') {
-    const topics = store.customTopics();
-    const requested = url.searchParams.get('c') || 'All';
-    const match =
-      requested === 'All'
-        ? 'All'
-        : topics.find((t) => t.toLowerCase() === requested.toLowerCase());
-    const topic = match || 'All';
-    html = renderTrending({ topic });
+    const period = url.searchParams.get('period') || 'week';
+    const category = url.searchParams.get('cat') || 'All';
+    html = renderTrending({ period, category });
     mount = () => {
-      mountTrending(view, topic);
+      mountTrending(view, { period, category });
     };
-    title = topic === 'All' ? 'Trending' : `${topic} — Trending`;
+    title = category === 'All' ? 'Trending' : `${category} — Trending`;
   } else if (seg[0] === 'channel' && seg[1]) {
     const ch = channelById(seg[1]);
     html = renderChannel(seg[1]);

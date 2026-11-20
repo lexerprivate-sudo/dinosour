@@ -136,10 +136,219 @@ export async function mountHome(root, topic = 'All') {
   return mountFeed(root, topic && topic !== 'All' ? [topic] : DEFAULT_SEEDS);
 }
 
-/** The Trending tab: popular YouTube results, optionally narrowed to a topic. */
-export async function mountTrending(root, topic = 'All') {
-  if (topic && topic.toLowerCase() !== 'all') return mountFeed(root, [topic]);
-  if (APP_MODE) return mountFeed(root, TRENDING_SEEDS);
+/**
+ * Trending is grouped by category (News, Games, Dance, Sports, ...) and by a
+ * time period. Every category owns its own topics; results are searched live,
+ * filtered to the chosen period, and sorted by views. Sections load as they
+ * scroll into view so opening the page does not fire dozens of requests.
+ */
+export async function mountTrending(root, { period = 'week', category = 'All' } = {}) {
+  const sectionsEl = root.querySelector('[data-trend-sections]');
+  if (!sectionsEl) return {};
+
+  const state = {
+    period: TREND_PERIODS.some(([key]) => key === period) ? period : 'week',
+    category,
+    loaded: new Set(),
+  };
+
+  const allSections = () => [...sectionsEl.querySelectorAll('[data-trend-section]')];
+  const visibleSections = () =>
+    allSections().filter(
+      (el) => state.category === 'All' || el.dataset.trendSection === state.category
+    );
+
+  const syncUrl = () => {
+    try {
+      history.replaceState(
+        history.state,
+        '',
+        `/feed/trending?period=${state.period}&cat=${encodeURIComponent(state.category)}`
+      );
+    } catch {
+      /* custom-origin WebView may restrict replaceState */
+    }
+  };
+
+  const loadSection = async (section) => {
+    const name = section.dataset.trendSection;
+    if (state.loaded.has(name) || section.hidden) return;
+    state.loaded.add(name);
+    const grid = section.querySelector('[data-trend-grid]');
+    if (!grid) return;
+    grid.innerHTML = '<div class="trend-loading"><span class="spinner"></span></div>';
+
+    const topics = store.trendingTopicsFor(name);
+    if (!topics.length) {
+      grid.innerHTML = trendEmpty(name);
+      return;
+    }
+
+    const found = [];
+    for (const topic of topics) {
+      try {
+        const data = await searchYouTube(topic);
+        found.push(...(data.videos || []));
+      } catch {
+        /* one failed topic does not break the rest of the section */
+      }
+    }
+    if (!section.isConnected) return;
+
+    const unique = [...new Map(found.filter((v) => v && v.id).map((v) => [v.id, v])).values()];
+    const limit = TREND_PERIOD_DAYS[state.period] ?? Infinity;
+    const inPeriod = unique
+      .filter((v) => {
+        if (limit === Infinity) return true;
+        const age = publishedAgeDays(v.publishedText);
+        return age != null && age <= limit;
+      })
+      .sort((a, b) => parseViews(b.viewsText) - parseViews(a.viewsText));
+    const ranked = inPeriod.length
+      ? inPeriod
+      : [...unique].sort((a, b) => parseViews(b.viewsText) - parseViews(a.viewsText));
+    const chosen = ranked.slice(0, state.category === 'All' ? 8 : 24);
+
+    grid.innerHTML = chosen.length
+      ? `${inPeriod.length ? '' : `<p class="trend-note">No uploads found in this period — showing the most popular available.</p>`}
+         <div class="grid">${chosen.map(ytCardHtml).join('')}</div>`
+      : trendEmpty(name, true);
+  };
+
+  const refreshChips = (section) => {
+    const list = section.querySelector('[data-trend-topic-list]');
+    if (!list) return;
+    list.innerHTML = trendTopicsHtml(section.dataset.trendSection);
+    wireSection(section);
+  };
+
+  const promptTopic = (section) => {
+    const name = section.dataset.trendSection;
+    openPrompt({
+      title: `Add a topic to ${name}`,
+      label: 'Topic',
+      placeholder: 'boxing, formula 1, cricket…',
+      confirmText: 'Add',
+      onSubmit: (value) => {
+        const added = store.addTrendingTopic(name, value);
+        if (!added) {
+          toast('Could not add that topic — empty, duplicate, or the limit was reached.');
+          return;
+        }
+        refreshChips(section);
+        state.loaded.delete(name);
+        loadSection(section);
+        toast(`Added “${added}” to ${name}.`);
+      },
+    });
+  };
+
+  const wireSection = (section) => {
+    section.querySelector('[data-trend-topic-add]')?.addEventListener('click', () => promptTopic(section));
+    section.querySelectorAll('[data-trend-remove]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        store.removeTrendingTopic(section.dataset.trendSection, btn.dataset.trendRemove);
+        refreshChips(section);
+        state.loaded.delete(section.dataset.trendSection);
+        loadSection(section);
+      });
+    });
+  };
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) if (entry.isIntersecting) loadSection(entry.target);
+    },
+    { rootMargin: '500px' }
+  );
+
+  allSections().forEach((section) => {
+    wireSection(section);
+    observer.observe(section);
+    if (!section.hidden) loadSection(section);
+  });
+
+  root.querySelectorAll('[data-period]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.period = btn.dataset.period;
+      root.querySelectorAll('[data-period]').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
+      state.loaded.clear();
+      visibleSections().forEach(loadSection);
+      syncUrl();
+    });
+  });
+
+  const applyCategory = () => {
+    allSections().forEach((el) => {
+      const show = state.category === 'All' || el.dataset.trendSection === state.category;
+      el.hidden = !show;
+      if (show) loadSection(el);
+    });
+    syncUrl();
+  };
+
+  root.querySelectorAll('[data-trend-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.category = btn.dataset.trendCat;
+      root.querySelectorAll('[data-trend-cat]').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
+      applyCategory();
+    });
+  });
+
+  root.querySelector('[data-trend-refresh]')?.addEventListener('click', () => {
+    state.loaded.clear();
+    visibleSections().forEach(loadSection);
+  });
+
+  root.querySelector('[data-trend-cat-add]')?.addEventListener('click', () => {
+    openPrompt({
+      title: 'Add a category',
+      label: 'Category name',
+      placeholder: 'Anime, Boxing, Podcasts…',
+      confirmText: 'Add',
+      onSubmit: (value) => {
+        const name = store.addTrendingCategory(value);
+        if (!name) {
+          toast('That category already exists or has an invalid name.');
+          return;
+        }
+        const tabs = root.querySelector('.trend-tabs');
+        const addBtn = root.querySelector('[data-trend-cat-add]');
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'chip';
+        tab.dataset.trendCat = name;
+        tab.setAttribute('role', 'tab');
+        tab.textContent = name;
+        tabs.insertBefore(tab, addBtn);
+        tab.addEventListener('click', () => {
+          state.category = name;
+          root.querySelectorAll('[data-trend-cat]').forEach((b) => {
+            const active = b === tab;
+            b.classList.toggle('active', active);
+            b.setAttribute('aria-selected', String(active));
+          });
+          applyCategory();
+        });
+        sectionsEl.insertAdjacentHTML('beforeend', trendSectionHtml(name));
+        const section = sectionsEl.lastElementChild;
+        wireSection(section);
+        observer.observe(section);
+        section.hidden = state.category !== 'All' && state.category !== name;
+        if (!section.hidden) loadSection(section);
+        toast(`Added ${name}. Now add topics inside it.`);
+      },
+    });
+  });
+
   return {};
 }
 
@@ -2129,28 +2338,95 @@ export function mountLibrary(root, kind, playlistId = '') {
 
 /* ============================================================ trending */
 
-export function renderTrending({ topic = 'All' } = {}) {
-  const isTopic = !!topic && topic.toLowerCase() !== 'all';
-  const chips = renderChips(isTopic ? topic : 'All');
-  const head = `<div class="page-head" style="padding:24px 24px 0;max-width:1400px;margin:0 auto">
-      <h1>${icon('flame')} Trending</h1>
-      <span class="spacer"></span>
-      <span class="page-count">${isTopic ? `Popular in ${esc(topic)}` : 'Popular on YouTube'}</span>
-    </div>`;
+const TREND_PERIODS = [
+  ['today', 'Today'],
+  ['week', '1 week'],
+  ['month', 'Last month'],
+  ['all', 'All time'],
+];
+const TREND_PERIOD_DAYS = { today: 1, week: 7, month: 31, all: Infinity };
 
-  if (APP_MODE || isTopic) {
-    return `${chips}${head}
-      <div class="grid" data-home-more-grid></div>
-      <div class="feed-loader" data-home-more hidden><span class="spinner"></span></div>
-      <div class="feed-end" data-home-end hidden>
-        <button type="button" class="btn-more" data-home-retry>Try again</button>
+/** "3 days ago" / "2 weeks ago" -> approximate age in days. */
+function publishedAgeDays(label) {
+  const s = String(label || '').toLowerCase();
+  if (!s || s.includes('premier')) return null;
+  const n = Number(s.match(/[\d,.]+/)?.[0]?.replace(/,/g, '')) || 0;
+  if (/\b(second|minute|hour)\b/.test(s)) return 0;
+  if (/\bday\b/.test(s)) return n;
+  if (/\bweek\b/.test(s)) return n * 7;
+  if (/\bmonth\b/.test(s)) return n * 30;
+  if (/\byear\b/.test(s)) return n * 365;
+  return null;
+}
+
+/** "1.2M views" -> 1200000, for sorting each section by popularity. */
+function parseViews(label) {
+  const s = String(label || '').toLowerCase().replace(/,/g, '');
+  const m = s.match(/([\d.]+)\s*([kmb])?/);
+  if (!m) return 0;
+  const mult = { k: 1e3, m: 1e6, b: 1e9 }[m[2] || ''] || 1;
+  return Number(m[1]) * mult;
+}
+
+function trendTopicsHtml(category) {
+  const topics = store.trendingTopicsFor(category);
+  return `${topics
+    .map(
+      (t) => `<span class="trend-topic">${esc(t)}<button type="button" class="trend-topic-x" data-trend-remove="${esc(t)}" aria-label="Remove ${esc(t)}">×</button></span>`
+    )
+    .join('')}<button type="button" class="trend-topic-add" data-trend-topic-add="${esc(category)}">${icon('plus')} Add topic</button>`;
+}
+
+function trendSectionHtml(category, hidden = false) {
+  return `<section class="trend-section" data-trend-section="${esc(category)}" ${hidden ? 'hidden' : ''}>
+    <div class="trend-section-head">
+      <h2>${icon('flame')} ${esc(category)}</h2>
+      <div class="trend-section-topics" data-trend-topic-list="${esc(category)}">${trendTopicsHtml(category)}</div>
+    </div>
+    <div class="trend-grid" data-trend-grid="${esc(category)}"></div>
+  </section>`;
+}
+
+function trendEmpty(category, failed = false) {
+  return `<div class="trend-empty">
+    <p>${failed ? `No videos found for ${esc(category)} right now.` : `Add a topic to see what is trending in ${esc(category)}.`}</p>
+    <button type="button" class="btn-outline" data-trend-topic-add="${esc(category)}">${icon('plus')} Add topic</button>
+  </div>`;
+}
+
+export function renderTrending({ period = 'week', category = 'All' } = {}) {
+  const selectedPeriod = TREND_PERIODS.some(([key]) => key === period) ? period : 'week';
+  const categories = store.trendingCategoryNames();
+  const selectedCategory = categories.includes(category) ? category : 'All';
+
+  return `<div class="trending-page">
+    <div class="trend-toolbar">
+      <div class="trend-toolbar-top">
+        <h1>${icon('flame')} Trending</h1>
+        <div class="trend-periods" role="group" aria-label="Time period">
+          ${TREND_PERIODS.map(
+            ([key, label]) =>
+              `<button type="button" class="trend-period ${key === selectedPeriod ? 'active' : ''}" data-period="${key}" aria-pressed="${key === selectedPeriod}">${label}</button>`
+          ).join('')}
+        </div>
+        <button type="button" class="trend-refresh" data-trend-refresh title="Refresh trending" aria-label="Refresh">${icon('refresh')}</button>
       </div>
-      <div class="feed-sentinel" data-home-sentinel aria-hidden="true"></div>`;
-  }
-
-  const list = [...longVideos(), ...shortVideos()].sort((a, b) => (b.views || 0) - (a.views || 0));
-  return `${chips}${head}
-    <div class="grid">${list.map(cardHtml).join('')}</div>`;
+      <div class="trend-tabs" role="tablist" aria-label="Trending categories">
+        ${['All', ...categories]
+          .map(
+            (c) =>
+              `<button type="button" class="chip ${c === selectedCategory ? 'active' : ''}" data-trend-cat="${esc(c)}" role="tab" aria-selected="${c === selectedCategory}">${esc(c)}</button>`
+          )
+          .join('')}
+        <button type="button" class="chip chip-add" data-trend-cat-add aria-label="Add a category">${icon('plus')} Category</button>
+      </div>
+    </div>
+    <div class="trend-sections" data-trend-sections>
+      ${categories
+        .map((c) => trendSectionHtml(c, selectedCategory !== 'All' && c !== selectedCategory))
+        .join('')}
+    </div>
+  </div>`;
 }
 
 /* ============================================================ channel */

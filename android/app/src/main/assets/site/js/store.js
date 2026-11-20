@@ -27,7 +27,22 @@ const defaults = {
   ytRate: 1,
   ytQuality: 'auto',
   sleepTimer: 0,
+  trendingTopics: {},
+  trendingCustom: [],
 };
+
+/* The built-in Trending sections. Each becomes its own header with its own
+   topics, so "Sports" can contain boxing, formula 1, cricket, and so on. */
+const TRENDING_CATEGORIES = [
+  { name: 'News', seeds: ['world news', 'breaking news', 'news today'] },
+  { name: 'Games', seeds: ['gaming highlights', 'game trailer', 'esports'] },
+  { name: 'Dance', seeds: ['dance challenge', 'dance performance', 'hip hop dance'] },
+  { name: 'Sports', seeds: ['sports highlights', 'football highlights', 'basketball highlights'] },
+  { name: 'Music', seeds: ['new music video', 'live concert', 'top songs'] },
+  { name: 'Tech', seeds: ['tech review', 'ai news', 'gadget review'] },
+  { name: 'Travel', seeds: ['travel vlog', '4k travel film', 'city tour'] },
+  { name: 'Food', seeds: ['street food', 'cooking recipe', 'food challenge'] },
+];
 
 /* YouTube items are stored with their metadata, because remote videos have no
    local catalog record to look up later. */
@@ -221,6 +236,59 @@ export const store = {
   removeTopic(name) {
     this.state.topics = this.customTopics().filter((t) => t !== name);
     this.save();
+  },
+
+  /* Trending: categories and the topics searched inside each one. */
+  trendingCategoryNames() {
+    const custom = Array.isArray(this.state.trendingCustom)
+      ? this.state.trendingCustom.filter((n) => typeof n === 'string' && n)
+      : [];
+    return [...TRENDING_CATEGORIES.map((c) => c.name), ...custom];
+  },
+
+  trendingDefaultTopics(name) {
+    const found = TRENDING_CATEGORIES.find(
+      (c) => c.name.toLowerCase() === String(name).toLowerCase()
+    );
+    return found ? [...found.seeds] : [];
+  },
+
+  trendingTopicsFor(name) {
+    const map = this.state.trendingTopics || {};
+    const saved = map[name];
+    if (Array.isArray(saved)) return saved.filter((t) => typeof t === 'string' && t);
+    return this.trendingDefaultTopics(name);
+  },
+
+  addTrendingTopic(category, name) {
+    const value = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!value || !category) return null;
+    const topics = this.trendingTopicsFor(category);
+    if (topics.length >= 10 || topics.some((t) => t.toLowerCase() === value.toLowerCase())) {
+      return null;
+    }
+    this.state.trendingTopics = { ...(this.state.trendingTopics || {}), [category]: [...topics, value] };
+    this.save();
+    return value;
+  },
+
+  removeTrendingTopic(category, name) {
+    this.state.trendingTopics = {
+      ...(this.state.trendingTopics || {}),
+      [category]: this.trendingTopicsFor(category).filter((t) => t !== name),
+    };
+    this.save();
+  },
+
+  addTrendingCategory(name) {
+    const value = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+    if (!value) return null;
+    const names = this.trendingCategoryNames();
+    if (names.some((n) => n.toLowerCase() === value.toLowerCase())) return null;
+    this.state.trendingCustom = [...names.filter((n) => !TRENDING_CATEGORIES.some((c) => c.name === n)), value];
+    this.state.trendingTopics = { ...(this.state.trendingTopics || {}), [value]: [] };
+    this.save();
+    return value;
   },
 
   /* Continue watching for YouTube playback. Entries hold the metadata the

@@ -2315,3 +2315,161 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
     padding: 20px 18px calc(20px + env(safe-area-inset-bottom));
   }
 }
+
+/* ---------------------------------------------------------- trending */
+
+.trending-page { padding-bottom: 48px; }
+
+.trend-toolbar {
+  position: sticky;
+  top: var(--header-h);
+  z-index: 60;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.trend-toolbar-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 24px 4px;
+  max-width: 1400px;
+  margin: 0 auto;
+  flex-wrap: wrap;
+}
+.trend-toolbar-top h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -.4px;
+}
+.trend-toolbar-top h1 .icon { width: 24px; height: 24px; color: var(--red); }
+.trend-periods {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border-radius: 9px;
+}
+.trend-period {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.trend-period:hover { color: var(--text); background: var(--surface-3); }
+.trend-period.active { background: var(--red); color: #fff; }
+.trend-refresh {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--text-2);
+}
+.trend-refresh:hover { background: var(--surface-2); color: var(--text); }
+.trend-refresh .icon { width: 17px; height: 17px; }
+
+.trend-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 8px 24px 12px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+.trend-tabs::-webkit-scrollbar { display: none; }
+
+.trend-sections { padding: 0 24px 32px; max-width: 1400px; margin: 0 auto; }
+.trend-section { margin-bottom: 30px; scroll-margin-top: calc(var(--header-h) + 104px); }
+.trend-section[hidden] { display: none; }
+
+.trend-section-head {
+  position: sticky;
+  top: calc(var(--header-h) + 96px);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 14px;
+}
+.trend-section-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.trend-section-head h2 .icon { width: 18px; height: 18px; color: var(--red); }
+.trend-section-topics { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; }
+.trend-topic {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 5px 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.trend-topic-x {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text-3);
+  font-size: 14px;
+  line-height: 1;
+}
+.trend-topic-x:hover { background: var(--surface-3); color: var(--text); }
+.trend-topic-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.trend-topic-add:hover { background: var(--surface-2); color: var(--text); }
+.trend-topic-add .icon { width: 13px; height: 13px; }
+
+.trend-grid { min-height: 60px; }
+.trend-loading { display: grid; place-items: center; min-height: 120px; }
+.trend-note { margin: 0 0 10px; color: var(--text-2); font-size: 13px; }
+.trend-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 22px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 14px;
+}
+.trend-empty p { margin: 0; }
+
+@media (max-width: 700px) {
+  .trend-toolbar-top { padding: 10px 12px 2px; gap: 10px; }
+  .trend-toolbar-top h1 { font-size: 19px; }
+  .trend-tabs { padding: 8px 12px 10px; }
+  .trend-sections { padding: 0 12px 24px; }
+  .trend-period { padding: 0 9px; font-size: 12px; }
+}
