@@ -835,8 +835,13 @@ public class MainActivity extends Activity {
   protected void onPause() {
     resumed = false;
     sendAppVisibility(false);
-    // While audio is playing in the background, keep the page (and the embed) alive.
-    if (web != null && !PlaybackService.RUNNING) web.onPause();
+    // While audio is playing in the background, keep the page (and the embed) alive:
+    // do not pause the WebView, and keep its timers running so the keep-alive retry
+    // and the media session stay active.
+    if (web != null) {
+      if (!PlaybackService.RUNNING) web.onPause();
+      else web.resumeTimers();
+    }
     super.onPause();
   }
 
