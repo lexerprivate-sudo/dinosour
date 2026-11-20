@@ -10,8 +10,19 @@ android {
         versionCode (project.hasProperty('versionCode') ? project.property('versionCode') as int : 20014)
         versionName (project.hasProperty('versionName') ? project.property('versionName') : '2.0.14')
     }
+    signingConfigs {
+        debug {
+            storeFile file('../../mobile/debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
     buildTypes {
-        debug { minifyEnabled false }
+        debug {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
