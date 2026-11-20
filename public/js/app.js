@@ -814,6 +814,74 @@ function mountSettings(root) {
     toast('Cache cleared');
   });
 
+  /* Diagnostics: surface the native crash report saved on the device. */
+  const crashStatus = root.querySelector('[data-crash-status]');
+  const crashBadge = root.querySelector('[data-crash-badge]');
+  const readCrash = () => {
+    try {
+      return window.Dinosour?.crashLog?.() || '';
+    } catch {
+      return '';
+    }
+  };
+  const paintCrash = () => {
+    const log = readCrash();
+    if (crashBadge) {
+      crashBadge.textContent = log ? 'Report saved' : 'No crashes';
+      crashBadge.dataset.tone = log ? 'err' : 'ok';
+    }
+  };
+  paintCrash();
+  root.querySelector('[data-copy-crash]')?.addEventListener('click', async () => {
+    const log = readCrash();
+    if (!log) {
+      if (crashStatus) {
+        crashStatus.textContent = 'No crash report has been recorded.';
+        crashStatus.dataset.tone = '';
+      }
+      return;
+    }
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(log);
+      copied = true;
+    } catch {
+      /* WebView may not expose the async clipboard API */
+    }
+    if (!copied) {
+      try {
+        const area = document.createElement('textarea');
+        area.value = log;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        copied = document.execCommand('copy');
+        area.remove();
+      } catch {
+        copied = false;
+      }
+    }
+    if (crashStatus) {
+      crashStatus.textContent = copied
+        ? 'Crash log copied — paste it anywhere to send it.'
+        : log.slice(0, 600);
+      crashStatus.dataset.tone = copied ? 'ok' : 'err';
+    }
+  });
+  root.querySelector('[data-clear-crash]')?.addEventListener('click', () => {
+    try {
+      window.Dinosour?.clearCrashLog?.();
+    } catch {
+      /* bridge unavailable */
+    }
+    paintCrash();
+    if (crashStatus) {
+      crashStatus.textContent = 'Crash report cleared.';
+      crashStatus.dataset.tone = 'ok';
+    }
+  });
+
   refreshChipsInPlace();
 }
 

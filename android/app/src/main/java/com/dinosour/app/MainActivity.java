@@ -675,6 +675,18 @@ public class MainActivity extends Activity {
       });
     }
 
+    /** Settings → Diagnostics: last uncaught exception, if any. */
+    @JavascriptInterface
+    public String crashLog() {
+      return CrashLogger.readLast(MainActivity.this);
+    }
+
+    /** Settings → Diagnostics: clear the stored crash report. */
+    @JavascriptInterface
+    public void clearCrashLog() {
+      CrashLogger.clear(MainActivity.this);
+    }
+
     /** Background playback: whether the app is exempt from battery optimization. */
     @JavascriptInterface
     public boolean isIgnoringBatteryOptimizations() {

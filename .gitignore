@@ -13,3 +13,4 @@ mobile/build/
 mobile/dinosour.apk
 mobile/dinosour.apk.idsig
 mobile/debug.keystore
+logs/
