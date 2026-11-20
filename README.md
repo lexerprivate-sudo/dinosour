@@ -40,11 +40,13 @@ Then open <http://localhost:3000>.
   going in a floating corner player with title, progress, expand and close.
   Opening any video page takes over from it.
 - **Background audio** - playback keeps its audio session alive when you leave the
-  app or lock the screen, with play, pause and stop on the lock screen and in the
-  notification shade. While the app is in the background it also retries play
+  app or lock the screen, with play, pause, next and stop on the lock screen and
+  in the notification shade. While the app is in the background it also retries play
   when YouTube pauses a hidden embed, so audio keeps going; a pause you choose
   is left alone. YouTube's embedded player can still stop on its own in rare
-  cases, and the media controls let you resume without reopening the app.
+  cases, and the media controls let you resume without reopening the app. The app
+  can also ask Android to skip battery optimization for more reliable background
+  playback, and a sleep timer can stop playback after 15/30/45/60 minutes.
 - **Your topics** — the home chips are whatever you add: type a topic and it
   becomes an endless YouTube feed. No fixed categories. The same chips appear on
   **Trending**, where a topic shows the popular videos for it.

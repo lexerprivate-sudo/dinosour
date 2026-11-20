@@ -28,6 +28,7 @@ public class PlaybackService extends Service {
   public static final String ACTION_STOP = "com.dinosour.app.MEDIA_STOP";
   public static final String ACTION_PLAY = "com.dinosour.app.MEDIA_PLAY";
   public static final String ACTION_PAUSE = "com.dinosour.app.MEDIA_PAUSE";
+  public static final String ACTION_SKIP_NEXT = "com.dinosour.app.MEDIA_NEXT";
 
   public static final String EXTRA_PLAYING = "playing";
   public static final String EXTRA_TITLE = "title";
@@ -85,6 +86,11 @@ public class PlaybackService extends Service {
         MainActivity.sendMediaCommand("stop");
         stopSelf();
       }
+
+      @Override
+      public void onSkipToNext() {
+        MainActivity.sendMediaCommand("next");
+      }
     });
     session.setActive(true);
   }
@@ -110,6 +116,11 @@ public class PlaybackService extends Service {
       playing = false;
       MainActivity.sendMediaCommand("pause");
       update();
+      return START_STICKY;
+    }
+
+    if (ACTION_SKIP_NEXT.equals(action)) {
+      MainActivity.sendMediaCommand("next");
       return START_STICKY;
     }
 
@@ -156,7 +167,8 @@ public class PlaybackService extends Service {
               | PlaybackState.ACTION_PAUSE
               | PlaybackState.ACTION_PLAY_PAUSE
               | PlaybackState.ACTION_STOP
-              | PlaybackState.ACTION_SEEK_TO)
+              | PlaybackState.ACTION_SEEK_TO
+              | PlaybackState.ACTION_SKIP_TO_NEXT)
           .setState(
               playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED,
               PlaybackState.PLAYBACK_POSITION_UNKNOWN,
@@ -175,6 +187,9 @@ public class PlaybackService extends Service {
     Intent stop = new Intent(this, PlaybackService.class).setAction(ACTION_STOP);
     PendingIntent stopIntent = PendingIntent.getService(this, 2, stop, pendingFlags());
 
+    Intent skip = new Intent(this, PlaybackService.class).setAction(ACTION_SKIP_NEXT);
+    PendingIntent skipIntent = PendingIntent.getService(this, 3, skip, pendingFlags());
+
     Notification.Builder builder = new Notification.Builder(this, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_stat_play)
         .setContentTitle(title)
@@ -188,6 +203,10 @@ public class PlaybackService extends Service {
             playing ? "Pause" : "Play",
             toggleIntent).build())
         .addAction(new Notification.Action.Builder(
+            android.R.drawable.ic_media_next,
+            "Next",
+            skipIntent).build())
+        .addAction(new Notification.Action.Builder(
             android.R.drawable.ic_menu_close_clear_cancel,
             "Stop",
             stopIntent).build());
@@ -195,7 +214,7 @@ public class PlaybackService extends Service {
     if (session != null) {
       builder.setStyle(new Notification.MediaStyle()
           .setMediaSession(session.getSessionToken())
-          .setShowActionsInCompactView(0, 1));
+          .setShowActionsInCompactView(0, 1, 2));
     }
 
     Notification notification = builder.build();

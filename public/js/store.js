@@ -26,6 +26,7 @@ const defaults = {
   playlists: [],
   ytRate: 1,
   ytQuality: 'auto',
+  sleepTimer: 0,
 };
 
 /* YouTube items are stored with their metadata, because remote videos have no

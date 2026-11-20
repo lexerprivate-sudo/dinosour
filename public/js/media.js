@@ -48,6 +48,7 @@ export function stopMedia() {
 export function onMediaCommand(action) {
   if (action === 'play') target?.play?.();
   else if (action === 'pause') target?.pause?.();
+  else if (action === 'next') target?.next?.();
   else if (action === 'stop') {
     target?.stop?.();
     stopMedia();

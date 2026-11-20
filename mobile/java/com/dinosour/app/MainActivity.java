@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
@@ -657,6 +658,33 @@ public class MainActivity extends Activity {
         if (web == null) return;
         web.clearCache(true);
         web.clearFormData();
+      });
+    }
+
+    /** Background playback: whether the app is exempt from battery optimization. */
+    @JavascriptInterface
+    public boolean isIgnoringBatteryOptimizations() {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+      PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+      return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+    }
+
+    /** Background playback: ask the user to exempt the app from battery optimization. */
+    @JavascriptInterface
+    public void requestIgnoreBatteryOptimizations() {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+      ui.post(() -> {
+        try {
+          Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+          intent.setData(Uri.parse("package:" + getPackageName()));
+          startActivity(intent);
+        } catch (Exception e) {
+          try {
+            Intent fallback = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+            startActivity(fallback);
+          } catch (Exception ignored) {
+          }
+        }
       });
     }
   }

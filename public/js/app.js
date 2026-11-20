@@ -741,6 +741,50 @@ function mountSettings(root) {
     toast('Watch history cleared');
   });
 
+  const batteryBtn = root.querySelector('[data-battery-opt]');
+  const batteryStatus = root.querySelector('[data-battery-status]');
+  const batteryBadge = root.querySelector('[data-battery-badge]');
+  const setBatteryStatus = (text, tone = '') => {
+    if (batteryStatus) {
+      batteryStatus.textContent = text;
+      batteryStatus.dataset.tone = tone;
+    }
+  };
+  const refreshBattery = () => {
+    const bridge = window.Dinosour;
+    if (!bridge?.isIgnoringBatteryOptimizations) {
+      if (batteryBadge) batteryBadge.textContent = APP_MODE ? 'Unavailable' : 'App only';
+      return;
+    }
+    const ignored = !!bridge.isIgnoringBatteryOptimizations();
+    if (batteryBadge) batteryBadge.textContent = ignored ? 'Allowed' : 'Restricted';
+    if (batteryBtn) batteryBtn.hidden = ignored;
+    setBatteryStatus(ignored ? 'Background playback is allowed.' : 'Battery optimization is on. Tap the button to allow background playback.', ignored ? 'ok' : '');
+  };
+  refreshBattery();
+  batteryBtn?.addEventListener('click', () => {
+    const bridge = window.Dinosour;
+    if (!bridge?.requestIgnoreBatteryOptimizations) {
+      setBatteryStatus('Only available in the Android app.', 'err');
+      return;
+    }
+    bridge.requestIgnoreBatteryOptimizations();
+    // Re-check after the user returns from the system dialog.
+    setTimeout(refreshBattery, 1500);
+  });
+
+  // One-time automatic prompt the first time the app is used on a restricted device.
+  if (APP_MODE && window.Dinosour?.requestIgnoreBatteryOptimizations) {
+    try {
+      if (!window.Dinosour.isIgnoringBatteryOptimizations?.() && !localStorage.getItem('dinosour.batteryPrompted')) {
+        localStorage.setItem('dinosour.batteryPrompted', '1');
+        setTimeout(() => {
+          try { window.Dinosour.requestIgnoreBatteryOptimizations(); } catch {}
+        }, 1200);
+      }
+    } catch {}
+  }
+
   root.querySelector('[data-clear-cache]')?.addEventListener('click', async () => {
     let cleared = false;
     try {

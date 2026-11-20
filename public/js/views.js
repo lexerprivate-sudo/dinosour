@@ -954,6 +954,7 @@ export function renderRemoteWatch(id, info = null) {
         <div class="watch-actions">
           <button class="action-btn" type="button" data-yt-rate title="Playback speed">${icon('gauge')} <span data-yt-rate-label>${rate}×</span></button>
           <button class="action-btn" type="button" data-yt-quality title="Video quality">${icon('hd')} <span data-yt-quality-label>${esc(quality)}</span></button>
+          <button class="action-btn" type="button" data-yt-sleep title="Sleep timer">${icon('clock')} <span data-yt-sleep-label>${(store.state.sleepTimer || 0) ? (store.state.sleepTimer + 'm') : 'Off'}</span></button>
           <button class="action-btn ${liked ? 'liked' : ''}" type="button" data-yt-like aria-pressed="${liked}">${icon('thumb-up')} <span data-yt-like-label>${liked ? 'Liked' : 'Like'}</span></button>
           <button class="action-btn ${savedYt ? 'active' : ''}" type="button" data-yt-save aria-pressed="${savedYt}">${icon(savedYt ? 'check' : 'save')} <span data-yt-save-label>${savedYt ? 'Saved' : 'Watch later'}</span></button>
           <button class="action-btn" type="button" data-yt-playlist>${icon('plus')} Playlist</button>
@@ -1016,6 +1017,45 @@ export function mountRemoteWatch(root, id) {
       qualityLabel.textContent = YT_QUALITIES.find(([value]) => value === currentQuality())[1];
     }
   };
+
+  /* Sleep timer: pause playback after N minutes. */
+  const sleepBtn = root.querySelector('[data-yt-sleep]');
+  const sleepLabelEl = root.querySelector('[data-yt-sleep-label]');
+  const SLEEP_OPTIONS = [0, 15, 30, 45, 60];
+  let sleepTimerHandle = null;
+  const refreshSleepLabel = () => {
+    const m = Number(store.state.sleepTimer) || 0;
+    if (sleepLabelEl) sleepLabelEl.textContent = m ? `${m}m` : 'Off';
+  };
+  const clearSleepTimer = () => {
+    if (sleepTimerHandle) {
+      clearTimeout(sleepTimerHandle);
+      sleepTimerHandle = null;
+    }
+  };
+  const armSleepTimer = (minutes) => {
+    clearSleepTimer();
+    store.set('sleepTimer', minutes);
+    refreshSleepLabel();
+    if (minutes > 0) {
+      sleepTimerHandle = setTimeout(() => {
+        try { mediaTarget?.pause?.(); } catch {}
+        toast(`Sleep timer: paused after ${minutes} min`);
+        store.set('sleepTimer', 0);
+        refreshSleepLabel();
+      }, minutes * 60 * 1000);
+      toast(`Sleep timer set for ${minutes} min`);
+    } else {
+      toast('Sleep timer off');
+    }
+  };
+  sleepBtn?.addEventListener('click', () => {
+    const current = Number(store.state.sleepTimer) || 0;
+    const idx = SLEEP_OPTIONS.indexOf(current);
+    const next = SLEEP_OPTIONS[(idx + 1) % SLEEP_OPTIONS.length];
+    armSleepTimer(next);
+  });
+  refreshSleepLabel();
 
   let frame = null;
   let duration = saved?.d || 0;
@@ -1101,6 +1141,10 @@ export function mountRemoteWatch(root, id) {
       playing = false;
       syncMedia(false);
       send({ event: 'command', func: 'pauseVideo', args: [] });
+    },
+    next() {
+      if (destroyed) return;
+      playNext();
     },
   };
   setMediaTarget(mediaTarget);
@@ -1408,6 +1452,7 @@ export function mountRemoteWatch(root, id) {
     clearTimeout(listenTimer);
     clearTimeout(seekTimer);
     clearInterval(endTimer);
+    clearSleepTimer();
     clearInterval(keepAliveTimer);
     clearMediaTarget(mediaTarget);
     send({ event: 'command', func: 'pauseVideo', args: [] });
@@ -2200,6 +2245,20 @@ export function renderSettings() {
       <div class="settings-actions">
         <button type="button" class="btn-outline" data-manage-topics>${icon('plus')} Add or edit topics</button>
       </div>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2>Background playback</h2>
+          <p>Let dinosour keep playing when the screen is off or the app is in the background.</p>
+        </div>
+        <span class="settings-badge" data-battery-badge>${app ? 'Checking…' : 'App only'}</span>
+      </div>
+      <div class="settings-actions">
+        <button type="button" class="btn-outline" data-battery-opt ${app ? '' : 'disabled'}>${icon('moon')} Allow background playback</button>
+      </div>
+      <p class="settings-status" data-battery-status role="status"></p>
     </section>
 
     <section class="settings-card">
