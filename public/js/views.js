@@ -1053,7 +1053,7 @@ function ytCardHtml(v, extra = '') {
     ${avatar({ name: channel, color: colorFor(channel) })}
     <div class="card-text">
       <a href="/watch/yt/${encodeURIComponent(v.id)}" data-link><h3 class="card-title">${esc(v.title)}</h3></a>
-      <div class="card-channel"><span class="name">${esc(channel)}</span></div>
+      <div class="card-channel"><a class="name account-link" href="/channel/${encodeURIComponent(v.channelId || channel)}?yt=1&name=${encodeURIComponent(channel)}" data-link title="Only ${esc(channel)} videos">${esc(channel)}</a></div>
       ${meta ? `<div class="card-meta">${esc(meta)}</div>` : ''}
     </div>
     ${extra}
@@ -1072,7 +1072,7 @@ function ytResultItemHtml(v) {
     <div class="result-info">
       <h3 class="result-title">${esc(v.title)}</h3>
       <div class="result-meta">${esc(meta || 'YouTube')}</div>
-      <div class="result-channel">${avatar({ name: v.channel, color: colorFor(v.channel) })}<span>${esc(v.channel)}</span></div>
+      <div class="result-channel"><a class="account-link" href="/channel/${encodeURIComponent(v.channelId || v.channel)}?yt=1&name=${encodeURIComponent(v.channel)}" data-link title="Only ${esc(v.channel)} videos">${avatar({ name: v.channel, color: colorFor(v.channel) })}<span>${esc(v.channel)}</span></a></div>
       ${desc ? `<div class="result-desc">${esc(desc)}</div>` : ''}
     </div>
   </a>`;
@@ -1342,6 +1342,20 @@ export function mountRemoteWatch(root, id) {
 
   const endCard = playerEl?.querySelector('[data-yt-end]');
 
+  /* Show that autoplay is locked to one account, with an easy way out. */
+  const activeAccount = store.accountFilter();
+  if (activeAccount) {
+    const banner = document.createElement('div');
+    banner.className = 'account-mode-banner';
+    banner.innerHTML = `${icon('film')}<span>Account mode: only <strong>${esc(activeAccount.name)}</strong> videos will play next.</span><button type="button" data-account-off>Turn off</button>`;
+    root.prepend(banner);
+    banner.querySelector('[data-account-off]')?.addEventListener('click', () => {
+      store.clearAccountFilter();
+      banner.remove();
+      toast('Account-only mode is off.');
+    });
+  }
+
   /* Tell the native media session when playback starts or stops. */
   const syncMedia = (next = playing) => {
     if (next === reportedPlaying) return;
@@ -1494,7 +1508,26 @@ export function mountRemoteWatch(root, id) {
     if (clear) clear.hidden = queue.length === 0;
   };
 
-  const nextUp = () => store.queueList()[0] || relatedVideos[0] || null;
+  /* Account mode keeps autoplay inside one channel (NewPipe's SinglePlayQueue
+     pattern): the queue is already restricted when it was built, but we also
+     guard here in case related results come from elsewhere. */
+  const accountMatches = (v) => {
+    const filter = store.accountFilter();
+    if (!filter || !v) return true;
+    const channel = String(v.channel || '').toLowerCase();
+    return String(v.channelId || '') === filter.id || channel === filter.name.toLowerCase();
+  };
+
+  const nextUp = () => {
+    const filter = store.accountFilter();
+    const queue = store.queueList();
+    if (filter) {
+      const inAccount = queue.find(accountMatches);
+      if (inAccount) return inAccount;
+      return relatedVideos.find(accountMatches) || null;
+    }
+    return queue[0] || relatedVideos[0] || null;
+  };
 
   const hideEndCard = () => {
     endVisible = false;
@@ -1541,6 +1574,7 @@ export function mountRemoteWatch(root, id) {
 
     // "Also next": whatever is queued, then the related rail, without repeats.
     const also = [...store.queueList(), ...relatedVideos]
+      .filter(accountMatches)
       .filter((v) => v.id !== id && v.id !== next?.id)
       .filter((v, i, all) => all.findIndex((x) => x.id === v.id) === i)
       .slice(0, 3);
@@ -2018,7 +2052,7 @@ export function mountRemoteWatch(root, id) {
     try {
       const data = await searchYouTube(seed);
       if (destroyed || !playerEl?.isConnected) return;
-      const videos = (data.videos || []).filter((v) => v.id !== id).slice(0, 12);
+      const videos = (data.videos || []).filter((v) => v.id !== id && accountMatches(v)).slice(0, 12);
       relatedVideos = videos;
       relatedEl.innerHTML = videos.length
         ? videos.map(ytRelItemHtml).join('')
@@ -2534,6 +2568,160 @@ export function mountChannel(root, id) {
       grid.innerHTML = list.map(cardHtml).join('');
     });
   });
+  return {};
+}
+
+/* ============================================================ account */
+
+function accountVideoHtml(v) {
+  const actions = `<div class="account-actions">
+    <button type="button" class="btn-outline btn-xs" data-acct-next ${queueAttrs(v)}>Play next</button>
+    <button type="button" class="btn-outline btn-xs" data-acct-add ${queueAttrs(v)}>Add to queue</button>
+  </div>`;
+  return ytCardHtml(v, actions);
+}
+
+export function renderAccount({ id, name } = {}) {
+  const label = name || id || 'Account';
+  const active = store.accountFilter()?.id === id;
+  return `<div class="page account-page">
+    <div class="account-head">
+      ${avatar({ name: label, color: colorFor(label) })}
+      <div class="account-info">
+        <span class="account-eyebrow">YouTube account</span>
+        <h1>${esc(label)}</h1>
+        <p>Only videos from this account. Queue them up and autoplay stays inside it.</p>
+      </div>
+    </div>
+    <div class="account-toolbar">
+      <button type="button" class="btn-primary" data-acct-playall>${icon('play')} Play all</button>
+      <button type="button" class="btn-outline" data-acct-addall>${icon('plus')} Add all to queue</button>
+      <button type="button" class="btn-outline ${active ? 'active' : ''}" data-acct-toggle aria-pressed="${active}">${active ? 'Account only: on' : 'Account only'}</button>
+      <button type="button" class="text-btn" data-acct-clearqueue>Clear queue</button>
+    </div>
+    <p class="account-status" data-acct-status role="status"></p>
+    <div class="grid" data-acct-grid></div>
+    <div class="feed-loader" data-acct-loading hidden><span class="spinner"></span></div>
+    <div class="feed-end" data-acct-more hidden><button type="button" class="btn-more" data-acct-loadmore>Load more videos</button></div>
+  </div>`;
+}
+
+/** Account-only view: live search restricted to one channel, with a queue that
+    autoplays only that channel's videos (NewPipe SinglePlayQueue pattern). */
+export async function mountAccount(root, { id, name } = {}) {
+  const grid = root.querySelector('[data-acct-grid]');
+  if (!grid) return {};
+  const label = name || id || '';
+  if (!label) return {};
+
+  const videos = [];
+  const seen = new Set();
+  let tokens = [];
+  const status = root.querySelector('[data-acct-status]');
+  const loader = root.querySelector('[data-acct-loading]');
+  const more = root.querySelector('[data-acct-more]');
+  const setStatus = (text) => {
+    if (status) status.textContent = text;
+  };
+
+  const matches = (v) => {
+    if (!v) return false;
+    const chId = String(v.channelId || '');
+    const ch = String(v.channel || '').toLowerCase();
+    return (!!id && chId === id) || ch === label.toLowerCase();
+  };
+
+  const paint = () => {
+    grid.innerHTML = videos.length
+      ? videos.map(accountVideoHtml).join('')
+      : '<p class="related-empty">No videos found for this account yet.</p>';
+  };
+
+  const load = async (nextPage = false) => {
+    if (loader) loader.hidden = !nextPage;
+    if (more) more.hidden = true;
+    try {
+      const data = nextPage && tokens[0]
+        ? await searchYouTube('', { continuation: tokens[0] })
+        : await searchYouTube(label);
+      if (!data) return;
+      tokens = data.continuation ? [data.continuation] : [];
+      const fresh = (data.videos || []).filter((v) => matches(v) && !seen.has(v.id));
+      for (const v of fresh) {
+        seen.add(v.id);
+        videos.push(v);
+      }
+      paint();
+    } catch {
+      setStatus('Couldn’t load videos for this account. Try again.');
+    } finally {
+      if (loader) loader.hidden = true;
+      if (more) more.hidden = !tokens.length;
+    }
+  };
+
+  const toggleBtn = root.querySelector('[data-acct-toggle]');
+  const paintToggle = () => {
+    const active = store.accountFilter()?.id === id;
+    if (!toggleBtn) return;
+    toggleBtn.classList.toggle('active', !!active);
+    toggleBtn.setAttribute('aria-pressed', String(!!active));
+    toggleBtn.textContent = active ? 'Account only: on' : 'Account only';
+  };
+  toggleBtn?.addEventListener('click', () => {
+    if (store.accountFilter()?.id === id) {
+      store.clearAccountFilter();
+      setStatus('Account-only autoplay is off.');
+    } else {
+      store.setAccountFilter(id, label);
+      setStatus(`Autoplay will now stay inside ${label}.`);
+    }
+    paintToggle();
+  });
+
+  root.querySelector('[data-acct-addall]')?.addEventListener('click', () => {
+    const added = store.addManyToQueue(videos);
+    setStatus(added ? `Added ${added} videos to Up Next.` : 'Those videos are already queued.');
+  });
+
+  root.querySelector('[data-acct-playall]')?.addEventListener('click', () => {
+    if (!videos.length) return;
+    store.setAccountFilter(id, label);
+    store.clearQueue();
+    store.addManyToQueue(videos.slice(1));
+    paintToggle();
+    navigate(`/watch/yt/${encodeURIComponent(videos[0].id)}?autoplay=1`);
+  });
+
+  root.querySelector('[data-acct-clearqueue]')?.addEventListener('click', () => {
+    store.clearQueue();
+    setStatus('Up Next cleared.');
+  });
+
+  grid.addEventListener('click', (event) => {
+    const add = event.target.closest('[data-acct-add]');
+    const next = event.target.closest('[data-acct-next]');
+    if (!add && !next) return;
+    event.preventDefault();
+    const el = add || next;
+    const video = {
+      id: el.dataset.addQueue,
+      title: el.dataset.qTitle,
+      channel: el.dataset.qChannel,
+      thumb: el.dataset.qThumb,
+      length: el.dataset.qLength,
+    };
+    if (next) store.playNextVideo(video);
+    else store.addToQueue(video);
+    setStatus(next ? 'Will play next.' : 'Added to Up Next.');
+  });
+
+  more?.addEventListener('click', () => load(true));
+
+  // Opening an account turns on account-only autoplay immediately.
+  store.setAccountFilter(id, label);
+  paintToggle();
+  await load(false);
   return {};
 }
 

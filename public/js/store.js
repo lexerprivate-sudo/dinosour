@@ -31,6 +31,7 @@ const defaults = {
   trendingCustom: [],
   trendingPrefs: {},
   searchHistory: [],
+  accountFilter: null,
 };
 
 /* The built-in Trending sections. Each becomes its own header with its own
@@ -411,6 +412,63 @@ export const store = {
   clearQueue() {
     this.state.queue = [];
     this.save();
+  },
+
+  /* Account mode: when set, next videos are restricted to this channel. */
+  accountFilter() {
+    const f = this.state.accountFilter;
+    return f && typeof f.id === 'string' && f.id ? f : null;
+  },
+
+  setAccountFilter(id, name) {
+    if (!id) return;
+    this.state.accountFilter = { id: String(id), name: String(name || id).slice(0, 120) };
+    this.save();
+  },
+
+  clearAccountFilter() {
+    this.state.accountFilter = null;
+    this.save();
+  },
+
+  /** Adds several videos in one write; returns how many were new. */
+  addManyToQueue(videos) {
+    let added = 0;
+    const list = this.queueList();
+    const seen = new Set(list.map((v) => v.id));
+    for (const video of videos || []) {
+      if (!video?.id || seen.has(video.id)) continue;
+      seen.add(video.id);
+      list.push({
+        id: video.id,
+        title: String(video.title || 'YouTube video').slice(0, 220),
+        channel: String(video.channel || 'YouTube').slice(0, 120),
+        thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
+        length: String(video.length || ''),
+      });
+      added += 1;
+    }
+    this.state.queue = list.slice(-30);
+    this.save();
+    return added;
+  },
+
+  /** Inserts a video at the front of the queue so it plays next. */
+  playNextVideo(video) {
+    if (!video?.id) return false;
+    const without = this.queueList().filter((v) => v.id !== video.id);
+    this.state.queue = [
+      {
+        id: video.id,
+        title: video.title || 'YouTube video',
+        channel: video.channel || 'YouTube',
+        thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
+        length: video.length || '',
+      },
+      ...without,
+    ].slice(0, 30);
+    this.save();
+    return true;
   },
 
   /* ------------------------------------------------ YouTube library */

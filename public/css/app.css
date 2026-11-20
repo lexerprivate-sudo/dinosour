@@ -2494,3 +2494,47 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
   .trend-sections { padding: 0 12px 24px; }
   .trend-period { padding: 0 9px; font-size: 12px; }
 }
+
+/* ---------------------------------------------------------- account mode */
+
+.account-link { color: inherit; text-decoration: none; }
+.account-link:hover { color: var(--blue); }
+.card-channel .account-link.name { color: var(--text-2); }
+.card-channel .account-link.name:hover { color: var(--blue); }
+
+.account-page { padding: 20px 24px 48px; max-width: 1400px; margin: 0 auto; }
+.account-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 20px; }
+.account-head .avatar { width: 88px; height: 88px; font-size: 32px; }
+.account-eyebrow { color: var(--red); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; }
+.account-info h1 { margin: 4px 0 6px; font-size: 28px; }
+.account-info p { margin: 0; color: var(--text-2); font-size: 14px; }
+.account-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.account-toolbar .btn-outline.active { background: var(--red); color: #fff; border-color: var(--red); }
+.account-status { min-height: 20px; margin: 0 0 14px; color: var(--text-2); font-size: 13px; }
+.account-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.btn-xs { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
+
+.account-mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 24px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--red);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-2);
+  font-size: 13px;
+}
+.account-mode-banner .icon { width: 16px; height: 16px; color: var(--red); }
+.account-mode-banner strong { color: var(--text); }
+.account-mode-banner button { margin-left: auto; color: var(--blue); font-size: 12px; font-weight: 600; }
+.account-mode-banner button:hover { text-decoration: underline; }
+
+@media (max-width: 700px) {
+  .account-page { padding: 16px 12px 32px; }
+  .account-head .avatar { width: 64px; height: 64px; font-size: 24px; }
+  .account-mode-banner { margin: 10px 12px 0; }
+}

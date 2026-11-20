@@ -9,6 +9,7 @@ import { suggestYouTube } from './yt.js';
 import { closeMini, openMini } from './mini.js';
 import { onMediaCommand, setAppVisible, stopMedia } from './media.js';
 import {
+  mountAccount,
   mountChannel,
   mountHome,
   mountLibrary,
@@ -16,6 +17,7 @@ import {
   mountResults,
   mountTrending,
   mountWatch,
+  renderAccount,
   renderChannel,
   renderChips,
   renderHome,
@@ -1023,6 +1025,14 @@ function renderRoute() {
       mountTrending(view, { period, sort, category });
     };
     title = category === 'All' ? 'Trending' : `${category} — Trending`;
+  } else if (seg[0] === 'channel' && seg[1] && url.searchParams.get('yt') === '1') {
+    const id = decodeURIComponent(seg[1]);
+    const name = url.searchParams.get('name') || id;
+    html = renderAccount({ id, name });
+    mount = () => {
+      mountAccount(view, { id, name });
+    };
+    title = `${name} — Account`;
   } else if (seg[0] === 'channel' && seg[1]) {
     const ch = channelById(seg[1]);
     html = renderChannel(seg[1]);
