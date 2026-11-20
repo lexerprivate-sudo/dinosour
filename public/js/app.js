@@ -296,7 +296,13 @@ document.addEventListener('click', (e) => {
     e.preventDefault();
     closeDrawer();
     hideSuggestions();
-    navigate(href);
+    // Opening a video is the user gesture that should start it; mark the
+    // route so the watch page starts playback without a second play tap.
+    const target = new URL(href, location.href);
+    if (target.origin === location.origin && target.pathname.startsWith('/watch/yt/')) {
+      target.searchParams.set('autoplay', '1');
+    }
+    navigate(`${target.pathname}${target.search}${target.hash}`);
     return;
   }
 
