@@ -1449,6 +1449,9 @@ export function mountRemoteWatch(root, id) {
     document.removeEventListener('visibilitychange', onHide);
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('dinosour:appvisibility', onAppVisibility);
+    if (window.__dinosourNativeFailed === onNativeFailed) {
+      delete window.__dinosourNativeFailed;
+    }
     clearTimeout(listenTimer);
     clearTimeout(seekTimer);
     clearInterval(endTimer);
@@ -1482,24 +1485,8 @@ export function mountRemoteWatch(root, id) {
   window.addEventListener('dinosour:appvisibility', onAppVisibility);
   keepAliveTimer = setInterval(nudgePlayback, 2000);
 
-  const startPlayback = () => {
-    if (!playerEl || playerEl.classList.contains('playing')) return;
-    wantPlaying = true;
-    lastAdvance = Date.now();
-    // In the Android app, the native ExoPlayer surface replaces the embed so
-    // background playback actually works.
-    if (APP_MODE && window.Dinosour?.playVideo) {
-      playerEl.replaceChildren();
-      playerEl.classList.add('playing');
-      started = true;
-      remember();
-      try {
-        window.Dinosour.playVideo(id);
-      } catch {
-        /* bridge unavailable */
-      }
-      return;
-    }
+  const startEmbed = () => {
+    if (!playerEl) return;
     frame = document.createElement('iframe');
     frame.className = 'yt-frame';
     const startParam =
@@ -1520,6 +1507,46 @@ export function mountRemoteWatch(root, id) {
       listen();
     });
   };
+
+  const startPlayback = () => {
+    if (!playerEl || playerEl.classList.contains('playing')) return;
+    wantPlaying = true;
+    lastAdvance = Date.now();
+    // In the Android app, the native ExoPlayer surface replaces the embed so
+    // background playback actually works.
+    if (APP_MODE && window.Dinosour?.playVideo) {
+      playerEl.replaceChildren();
+      playerEl.classList.add('playing');
+      started = true;
+      remember();
+      try {
+        window.Dinosour.playVideo(id);
+      } catch {
+        startEmbed();
+      }
+      return;
+    }
+    startEmbed();
+  };
+
+  /* The native extractor can fail when YouTube changes its signatures or
+     anti-bot checks. The Java side calls back here and we quietly switch to
+     the regular embed, so a video tap never leaves a dead player. */
+  const onNativeFailed = () => {
+    if (destroyed || !APP_MODE || !window.Dinosour?.playVideo) return;
+    if (!playerEl?.classList.contains('playing')) return;
+    try {
+      window.Dinosour.stopPlayer?.();
+    } catch {
+      /* bridge unavailable */
+    }
+    playerEl.classList.remove('playing');
+    started = false;
+    frame = null;
+    startEmbed();
+    toast('Using the web player for this video.');
+  };
+  window.__dinosourNativeFailed = onNativeFailed;
 
   playBtn?.addEventListener('click', startPlayback);
   root.querySelector('[data-copy-remote]')?.addEventListener('click', () => copyLink());

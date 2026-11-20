@@ -1,9 +1,11 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
-rem Fixed port so the Chrome URL is always correct.
-set "PORT=3210"
+rem Pick a free port starting at 3210 so Chrome always opens the right URL.
+set "PORT="
+for /f %%i in ('powershell -NoProfile -Command "$p=3210; while (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue) { $p++ }; $p" 2^>nul') do set "PORT=%%i"
+if not defined PORT set "PORT=3210"
 
 echo ================================================================
 echo  dinosour local server

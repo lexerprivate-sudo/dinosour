@@ -43,20 +43,29 @@ public class PlayerService extends MediaSessionService {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null || session == null) return START_STICKY;
+        if (intent == null || session == null) {
+            MainActivity.notifyNativeFailure();
+            return START_STICKY;
+        }
         final String url = intent.getStringExtra(EXTRA_VIDEO_URL);
         final String title = intent.getStringExtra(EXTRA_TITLE);
         final String channel = intent.getStringExtra(EXTRA_CHANNEL);
         if (url == null) return START_STICKY;
         new Thread(() -> {
             try {
-                if (session == null) return;
+                if (session == null) {
+                    MainActivity.notifyNativeFailure();
+                    return;
+                }
                 StreamInfo info = StreamInfo.getInfo(ServiceList.YouTube, url);
                 String streamUrl = null;
                 if (info.getVideoStreams() != null && !info.getVideoStreams().isEmpty()) {
                     streamUrl = info.getVideoStreams().get(0).getUrl();
                 }
-                if (streamUrl == null) return;
+                if (streamUrl == null) {
+                    MainActivity.notifyNativeFailure();
+                    return;
+                }
                 MediaItem item = new MediaItem.Builder()
                     .setUri(streamUrl)
                     .setMediaMetadata(new MediaMetadata.Builder()
@@ -67,7 +76,9 @@ public class PlayerService extends MediaSessionService {
                 session.getPlayer().setMediaItem(item);
                 session.getPlayer().prepare();
                 session.getPlayer().play();
-            } catch (Throwable ignored) {
+            } catch (Throwable error) {
+                MainActivity.notifyNativeFailure();
+                android.util.Log.w("DinosourPlayer", "stream extraction failed", error);
             }
         }).start();
         return START_STICKY;

@@ -287,3 +287,34 @@ credit visible — that license requires it.
   reduced motion, previews are off — add `?previews=1` to a URL to turn them on.
 - The player has no analytics, no ads, no autoplay-with-sound. Autoplay-next waits
   six seconds and is off in one click. It is also remembered.
+
+## Android: diagnostics, updates and caveats
+
+- **Crash reports** — the Android app saves every uncaught exception to
+  `files/crash-last.txt` (and appends to `crash-history.txt`) and logs it under
+  the `DinosourCrash` logcat tag. If the app ever closes unexpectedly, reopen it
+  and go to **Settings → Diagnostics → Copy crash log**, then paste the report
+  into a bug report. WebView renderer deaths and low-memory warnings are recorded
+  there too.
+- **Live logcat capture** — with the phone connected (USB debugging on), run
+  `tools\capture-logcat.bat`, reproduce the problem, and press Ctrl+C. The log is
+  saved under `logs\`. This is the fallback when no crash report appears (native
+  crashes and system kills do not produce a Java stack trace).
+- **Installing updates** — the app checks GitHub Releases on launch and prompts
+  with a single **Install** button. If the app cannot open at all, sideload
+  `mobile\dinosour.apk` (or the APK from the release page) directly; it replaces
+  the installed version without uninstalling or losing data.
+- **Signing key** — updates only work while every build uses the same signing
+  certificate (`mobile\debug.keystore`, cert SHA-256 `499c6838…`). Run
+  `tools\backup-keystore.bat` to keep a timestamped copy. Losing or regenerating
+  it makes all installed copies reject future updates with "package conflicts".
+- **Repository visibility** — the in-app updater reads the public GitHub API and
+  downloads the APK asset, so the repository must stay public and each release
+  must include `dinosour.apk`.
+- **Native player fallback** — videos are first tried through the native
+  ExoPlayer/NewPipe path. If YouTube blocks stream extraction (signature or
+  anti-bot changes), the app automatically falls back to the embedded YouTube
+  player for that video instead of showing a dead player.
+- **Local server for development** — double-click `start-local.bat`. It picks a
+  free port from 3210 upward, starts the server, and opens the site in Chrome.
+  Stop the server with Ctrl+C in its window.

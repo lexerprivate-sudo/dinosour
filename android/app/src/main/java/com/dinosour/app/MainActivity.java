@@ -4,6 +4,7 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ComponentCallbacks2;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -25,6 +26,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -98,6 +100,7 @@ public class MainActivity extends Activity {
   private static WeakReference<MainActivity> instance = new WeakReference<>(null);
   private boolean resumed;
   private boolean notifPrompted;
+  private long lastMemEvent;
 
   private final ExecutorService io = Executors.newSingleThreadExecutor();
   private final Handler ui = new Handler(Looper.getMainLooper());
@@ -156,6 +159,18 @@ public class MainActivity extends Activity {
       @SuppressWarnings("deprecation")
       public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
         return intercept(Uri.parse(url));
+      }
+
+      @Override
+      public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+        // A WebView renderer crash does not throw on the Java thread and would
+        // otherwise leave no report in Settings.
+        CrashLogger.recordEvent(
+            MainActivity.this,
+            "WebView renderer gone, crashed=" + (detail != null && detail.didCrash())
+                + ", url=" + (view == null ? "?" : view.getUrl()));
+        if (web != null) web.reload();
+        return true;
       }
 
       @Override
@@ -840,6 +855,17 @@ public class MainActivity extends Activity {
     });
   }
 
+  /** Native extraction failed — let the page fall back to the YouTube embed. */
+  static void notifyNativeFailure() {
+    final MainActivity activity = instance.get();
+    if (activity == null) return;
+    activity.ui.post(() -> {
+      if (activity.web == null) return;
+      activity.web.evaluateJavascript(
+          "window.__dinosourNativeFailed&&window.__dinosourNativeFailed()", null);
+    });
+  }
+
   /** Tells the page whether the app is foregrounded, so hidden embeds can be
       kept alive only while the user actually expects audio to continue. */
   private void sendAppVisibility(final boolean visible) {
@@ -956,6 +982,27 @@ public class MainActivity extends Activity {
       checkForUpdate(true, false);
     } else {
       checkForUpdate();
+    }
+  }
+
+  private void recordMemoryEvent(String what) {
+    long now = System.currentTimeMillis();
+    if (now - lastMemEvent < 60000) return;
+    lastMemEvent = now;
+    CrashLogger.recordEvent(this, what);
+  }
+
+  @Override
+  public void onLowMemory() {
+    super.onLowMemory();
+    recordMemoryEvent("System low memory");
+  }
+
+  @Override
+  public void onTrimMemory(int level) {
+    super.onTrimMemory(level);
+    if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+      recordMemoryEvent("Trim memory level " + level);
     }
   }
 

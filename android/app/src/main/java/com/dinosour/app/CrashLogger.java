@@ -91,6 +91,29 @@ public final class CrashLogger {
     }
   }
 
+  /**
+   * Records a non-Java failure (for example a WebView renderer death or a
+   * low-memory warning) in the same place crashes go, so Settings can still
+   * show the user something useful when the app did not throw an exception.
+   */
+  public static void recordEvent(Context context, String event) {
+    String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
+    String text = "=== dinosour diagnostic: " + event + " (" + time + ") ===\n";
+    Log.e(TAG, text.trim());
+    try {
+      File dir = context.getFilesDir();
+      if (dir != null && dir.exists()) {
+        try (FileWriter last = new FileWriter(new File(dir, LAST), true)) {
+          last.write(text);
+        }
+        try (FileWriter history = new FileWriter(new File(dir, HISTORY), true)) {
+          history.write(text);
+        }
+      }
+    } catch (Throwable ignored) {
+    }
+  }
+
   /** Returns the last crash report, or an empty string when there is none. */
   public static String readLast(Context context) {
     try {
