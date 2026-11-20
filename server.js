@@ -86,8 +86,11 @@ function sendFile(req, res, file, stat, { cache, rangeOk }) {
   const ext = path.extname(file).toLowerCase();
   const type = MIME[ext] || 'application/octet-stream';
   const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+  // The app shell must never come from a browser cache: stale HTML/CSS/JS was
+  // showing an old app on localhost after the origin was used by something else.
+  const appShell = /\.(html?|js|mjs|css|json)$/i.test(file);
 
-  if (req.headers['if-none-match'] === etag) {
+  if (!appShell && req.headers['if-none-match'] === etag) {
     res.writeHead(304, { ETag: etag });
     res.end();
     return;
@@ -103,7 +106,7 @@ function sendFile(req, res, file, stat, { cache, rangeOk }) {
   const baseHeaders = {
     'Content-Type': type,
     'Accept-Ranges': 'bytes',
-    'Cache-Control': cache || 'no-cache',
+    'Cache-Control': appShell ? 'no-store' : (cache || 'no-cache'),
     ETag: etag,
     'X-Content-Type-Options': 'nosniff',
   };
