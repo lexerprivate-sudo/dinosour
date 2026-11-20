@@ -43,6 +43,10 @@ public class PlayerService extends MediaSessionService {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && "com.dinosour.app.MEDIA_NEXT".equals(intent.getAction())) {
+            MainActivity.sendMediaCommand("next");
+            return START_STICKY;
+        }
         if (intent == null || session == null) {
             MainActivity.notifyNativeFailure();
             return START_STICKY;

@@ -32,6 +32,7 @@ const defaults = {
   trendingPrefs: {},
   searchHistory: [],
   accountFilter: null,
+  nextCursor: 0,
 };
 
 /* The built-in Trending sections. Each becomes its own header with its own
@@ -388,7 +389,6 @@ export const store = {
 
   addToQueue(video) {
     if (!video || !video.id) return false;
-    if (this.inQueue(video.id)) return false;
     const entry = {
       id: video.id,
       title: video.title || 'YouTube video',
@@ -396,7 +396,9 @@ export const store = {
       thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
       length: video.length || '',
     };
-    this.state.queue = [...this.queueList(), entry].slice(-30);
+    // Native clients (LibreTube PlayingQueue.add) move an existing copy to the
+    // tail instead of silently doing nothing.
+    this.state.queue = [...this.queueList().filter((v) => v.id !== video.id), entry].slice(-30);
     this.save();
     return true;
   },
@@ -453,22 +455,30 @@ export const store = {
     return added;
   },
 
-  /** Inserts a video at the front of the queue so it plays next. */
+  /**
+   * Inserts a video so it plays next. A cursor keeps repeated "Play next"
+   * clicks in click order instead of reversing them (REA finding).
+   */
   playNextVideo(video) {
     if (!video?.id) return false;
     const without = this.queueList().filter((v) => v.id !== video.id);
-    this.state.queue = [
-      {
-        id: video.id,
-        title: video.title || 'YouTube video',
-        channel: video.channel || 'YouTube',
-        thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
-        length: video.length || '',
-      },
-      ...without,
-    ].slice(0, 30);
+    const cursor = Math.min(Number(this.state.nextCursor) || 0, without.length);
+    without.splice(cursor, 0, {
+      id: video.id,
+      title: video.title || 'YouTube video',
+      channel: video.channel || 'YouTube',
+      thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
+      length: video.length || '',
+    });
+    this.state.queue = without.slice(0, 30);
+    this.state.nextCursor = cursor + 1;
     this.save();
     return true;
+  },
+
+  resetNextCursor() {
+    this.state.nextCursor = 0;
+    this.save();
   },
 
   /* ------------------------------------------------ YouTube library */

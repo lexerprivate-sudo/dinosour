@@ -1215,6 +1215,7 @@ export function renderRemoteWatch(id, info = null) {
           <button class="action-btn ${liked ? 'liked' : ''}" type="button" data-yt-like aria-pressed="${liked}">${icon('thumb-up')} <span data-yt-like-label>${liked ? 'Liked' : 'Like'}</span></button>
           <button class="action-btn ${savedYt ? 'active' : ''}" type="button" data-yt-save aria-pressed="${savedYt}">${icon(savedYt ? 'check' : 'save')} <span data-yt-save-label>${savedYt ? 'Saved' : 'Watch later'}</span></button>
           <button class="action-btn" type="button" data-yt-playlist>${icon('plus')} Playlist</button>
+          ${APP_MODE ? `<button class="action-btn" type="button" data-yt-pip title="Picture in picture">${icon('fullscreen')} PiP</button>` : ''}
           <a class="action-btn" href="https://www.youtube.com/watch?v=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">${icon('play')} Open on YouTube</a>
           <button class="action-btn" data-copy-remote>${icon('share')} Copy link</button>
         </div>
@@ -1498,6 +1499,28 @@ export function mountRemoteWatch(root, id) {
 
   /* ---------------------------------------------------------- up next */
 
+  /* When account-only autoplay is running low on queued videos, fetch more
+     from that same channel (LibreTube's fetchMoreFromChannel pattern) so the
+     queue does not dry up after the initial batch. */
+  let toppingUp = false;
+  const topUpAccountQueue = async () => {
+    const filter = store.accountFilter();
+    if (!filter || toppingUp || store.queueList().length > 2) return;
+    toppingUp = true;
+    try {
+      const data = await searchYouTube(filter.name);
+      const more = (data.videos || []).filter((v) => accountMatches(v) && v.id !== id);
+      if (more.length) {
+        store.addManyToQueue(more);
+        paintQueue();
+      }
+    } catch {
+      /* optional improvement */
+    } finally {
+      toppingUp = false;
+    }
+  };
+
   const paintQueue = () => {
     const list = root.querySelector('[data-queue-list]');
     const empty = root.querySelector('[data-queue-empty]');
@@ -1506,6 +1529,7 @@ export function mountRemoteWatch(root, id) {
     if (list) list.innerHTML = queue.map(queueItemHtml).join('');
     if (empty) empty.hidden = queue.length > 0;
     if (clear) clear.hidden = queue.length === 0;
+    if (store.accountFilter()) topUpAccountQueue();
   };
 
   /* Account mode keeps autoplay inside one channel (NewPipe's SinglePlayQueue
@@ -1840,10 +1864,19 @@ export function mountRemoteWatch(root, id) {
   window.__dinosourNativeFailed = onNativeFailed;
 
   playBtn?.addEventListener('click', startPlayback);
+  root.querySelector('[data-yt-pip]')?.addEventListener('click', () => {
+    try {
+      if (window.Dinosour?.pipVideo) window.Dinosour.pipVideo();
+      else toast('Picture in picture is only available in the Android app.');
+    } catch {
+      toast('Picture in picture is unavailable right now.');
+    }
+  });
   root.querySelector('[data-copy-remote]')?.addEventListener('click', () => copyLink());
 
   // This video is playing now, so it no longer waits in Up Next.
   store.removeFromQueue(id);
+  store.resetNextCursor();
   paintQueue();
 
   root.addEventListener('click', (event) => {

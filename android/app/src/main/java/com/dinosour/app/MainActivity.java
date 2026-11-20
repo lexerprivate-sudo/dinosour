@@ -101,6 +101,7 @@ public class MainActivity extends Activity {
   private boolean resumed;
   private boolean notifPrompted;
   private long lastMemEvent;
+  private String currentVideoId;
 
   private final ExecutorService io = Executors.newSingleThreadExecutor();
   private final Handler ui = new Handler(Looper.getMainLooper());
@@ -735,6 +736,7 @@ public class MainActivity extends Activity {
       if (id == null || id.isEmpty()) return;
       ui.post(() -> {
         try {
+          currentVideoId = id;
           connectPlayer();
           Intent intent = new Intent(MainActivity.this, PlayerService.class);
           intent.putExtra(PlayerService.EXTRA_VIDEO_URL, "https://www.youtube.com/watch?v=" + id);
@@ -756,6 +758,21 @@ public class MainActivity extends Activity {
         try {
           if (playerView != null) playerView.setVisibility(View.GONE);
           stopService(new Intent(MainActivity.this, PlayerService.class));
+        } catch (Throwable ignored) {
+        }
+      });
+    }
+
+    /** Native player: open the standalone player in picture-in-picture mode. */
+    @JavascriptInterface
+    public void pipVideo() {
+      ui.post(() -> {
+        try {
+          Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
+          if (currentVideoId != null && !currentVideoId.isEmpty()) {
+            intent.putExtra(PlayerActivity.EXTRA_VIDEO_ID, currentVideoId);
+          }
+          startActivity(intent);
         } catch (Throwable ignored) {
         }
       });

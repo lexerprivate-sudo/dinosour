@@ -36,7 +36,10 @@
 
         <activity
             android:name=".PlayerActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:supportsPictureInPicture="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden|uiMode" />
 
         <provider
             android:name=".UpdateProvider"
