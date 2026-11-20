@@ -2,6 +2,7 @@ package com.dinosour.app;
 
 import android.content.Intent;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.session.MediaSession;
@@ -14,6 +15,7 @@ import org.schabi.newpipe.extractor.stream.StreamInfo;
  * lives here (not in an Activity), audio keeps playing when the screen is off
  * or the app is backgrounded.
  */
+@UnstableApi
 public class PlayerService extends MediaSessionService {
     public static final String EXTRA_VIDEO_URL = "video_url";
     public static final String EXTRA_TITLE = "title";

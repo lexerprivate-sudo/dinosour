@@ -2,3 +2,14 @@ android/build/
 android/app/build/
 android/.gradle/
 android/local.properties
+
+node_modules/
+data/
+dist/
+media/
+raw/
+thumbs/
+mobile/build/
+mobile/dinosour.apk
+mobile/dinosour.apk.idsig
+mobile/debug.keystore

@@ -1462,7 +1462,10 @@ export function mountRemoteWatch(root, id) {
 
   /* Leaving while the video is rolling: the app turns this into a mini player. */
   const handOff = () => {
-    if (destroyed || !playing || !frame) return null;
+    if (destroyed || !playing) return null;
+    // The native player owns playback in the app; no mini iframe needed.
+    if (APP_MODE && window.Dinosour?.playVideo) return null;
+    if (!frame) return null;
     return {
       id,
       title: meta.title,
@@ -1483,6 +1486,20 @@ export function mountRemoteWatch(root, id) {
     if (!playerEl || playerEl.classList.contains('playing')) return;
     wantPlaying = true;
     lastAdvance = Date.now();
+    // In the Android app, the native ExoPlayer surface replaces the embed so
+    // background playback actually works.
+    if (APP_MODE && window.Dinosour?.playVideo) {
+      playerEl.replaceChildren();
+      playerEl.classList.add('playing');
+      started = true;
+      remember();
+      try {
+        window.Dinosour.playVideo(id);
+      } catch {
+        /* bridge unavailable */
+      }
+      return;
+    }
     frame = document.createElement('iframe');
     frame.className = 'yt-frame';
     const startParam =
