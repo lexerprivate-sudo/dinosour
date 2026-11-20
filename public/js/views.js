@@ -142,15 +142,20 @@ export async function mountHome(root, topic = 'All') {
  * filtered to the chosen period, and sorted by views. Sections load as they
  * scroll into view so opening the page does not fire dozens of requests.
  */
-export async function mountTrending(root, { period = 'week', category = 'All' } = {}) {
+export async function mountTrending(root, { period, category, sort } = {}) {
   const sectionsEl = root.querySelector('[data-trend-sections]');
   if (!sectionsEl) return {};
+  const prefs = store.trendingPref();
 
   const state = {
-    period: TREND_PERIODS.some(([key]) => key === period) ? period : 'week',
-    category,
+    period: TREND_PERIODS.some(([key]) => key === period) ? period : prefs.period,
+    sort: sort === 'newest' || sort === 'views' ? sort : prefs.sort,
+    category: category || prefs.category,
     loaded: new Set(),
+    cache: new Map(),
+    limits: new Map(),
   };
+  const pageLimit = () => (state.category === 'All' ? 8 : 24);
 
   const allSections = () => [...sectionsEl.querySelectorAll('[data-trend-section]')];
   const visibleSections = () =>
@@ -163,7 +168,7 @@ export async function mountTrending(root, { period = 'week', category = 'All' } 
       history.replaceState(
         history.state,
         '',
-        `/feed/trending?period=${state.period}&cat=${encodeURIComponent(state.category)}`
+        `/feed/trending?period=${state.period}&sort=${state.sort}&cat=${encodeURIComponent(state.category)}`
       );
     } catch {
       /* custom-origin WebView may restrict replaceState */
@@ -197,22 +202,39 @@ export async function mountTrending(root, { period = 'week', category = 'All' } 
 
     const unique = [...new Map(found.filter((v) => v && v.id).map((v) => [v.id, v])).values()];
     const limit = TREND_PERIOD_DAYS[state.period] ?? Infinity;
-    const inPeriod = unique
-      .filter((v) => {
-        if (limit === Infinity) return true;
-        const age = publishedAgeDays(v.publishedText);
-        return age != null && age <= limit;
-      })
-      .sort((a, b) => parseViews(b.viewsText) - parseViews(a.viewsText));
-    const ranked = inPeriod.length
-      ? inPeriod
-      : [...unique].sort((a, b) => parseViews(b.viewsText) - parseViews(a.viewsText));
-    const chosen = ranked.slice(0, state.category === 'All' ? 8 : 24);
+    const inPeriod = unique.filter((v) => {
+      if (limit === Infinity) return true;
+      const age = publishedAgeDays(v.publishedText);
+      return age != null && age <= limit;
+    });
+    state.cache.set(name, { unique, inPeriod });
+    state.limits.set(name, pageLimit());
+    renderSection(section);
+  };
 
+  /** Renders a section from cached results; used by sort, load-more and reload. */
+  const renderSection = (section) => {
+    const name = section.dataset.trendSection;
+    const grid = section.querySelector('[data-trend-grid]');
+    const more = section.querySelector('[data-trend-more]');
+    const cached = state.cache.get(name);
+    if (!grid || !cached) return;
+
+    const base = cached.inPeriod.length ? cached.inPeriod : cached.unique;
+    const ranked = [...base].sort((a, b) =>
+      state.sort === 'newest'
+        ? (publishedAgeDays(a.publishedText) ?? 1e9) - (publishedAgeDays(b.publishedText) ?? 1e9)
+        : parseViews(b.viewsText) - parseViews(a.viewsText)
+    );
+    const limit = state.limits.get(name) || pageLimit();
+    const chosen = ranked.slice(0, limit);
+    const note = !cached.inPeriod.length && cached.unique.length
+      ? '<p class="trend-note">No uploads found in this period — showing the most popular available.</p>'
+      : '';
     grid.innerHTML = chosen.length
-      ? `${inPeriod.length ? '' : `<p class="trend-note">No uploads found in this period — showing the most popular available.</p>`}
-         <div class="grid">${chosen.map(ytCardHtml).join('')}</div>`
+      ? `${note}<div class="grid">${chosen.map(ytCardHtml).join('')}</div>`
       : trendEmpty(name, true);
+    if (more) more.hidden = chosen.length >= ranked.length;
   };
 
   const refreshChips = (section) => {
@@ -277,8 +299,28 @@ export async function mountTrending(root, { period = 'week', category = 'All' } 
         b.setAttribute('aria-pressed', String(active));
       });
       state.loaded.clear();
+      state.cache.clear();
       visibleSections().forEach(loadSection);
+      store.setTrendingPref({ period: state.period });
       syncUrl();
+    });
+  });
+
+  root.querySelectorAll('[data-sort]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.sort = btn.dataset.sort === 'newest' ? 'newest' : 'views';
+      root.querySelectorAll('[data-sort]').forEach((b) => b.classList.toggle('active', b === btn));
+      visibleSections().forEach(renderSection);
+      store.setTrendingPref({ sort: state.sort });
+    });
+  });
+
+  sectionsEl.querySelectorAll('[data-trend-more]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const name = btn.dataset.trendMore;
+      state.limits.set(name, (state.limits.get(name) || pageLimit()) + pageLimit());
+      const section = sectionsEl.querySelector(`[data-trend-section="${CSS.escape(name)}"]`);
+      if (section) renderSection(section);
     });
   });
 
@@ -286,8 +328,13 @@ export async function mountTrending(root, { period = 'week', category = 'All' } 
     allSections().forEach((el) => {
       const show = state.category === 'All' || el.dataset.trendSection === state.category;
       el.hidden = !show;
-      if (show) loadSection(el);
+      state.limits.set(el.dataset.trendSection, pageLimit());
+      if (show) {
+        if (state.cache.has(el.dataset.trendSection)) renderSection(el);
+        else loadSection(el);
+      }
     });
+    store.setTrendingPref({ category: state.category });
     syncUrl();
   };
 
@@ -305,6 +352,7 @@ export async function mountTrending(root, { period = 'week', category = 'All' } 
 
   root.querySelector('[data-trend-refresh]')?.addEventListener('click', () => {
     state.loaded.clear();
+    state.cache.clear();
     visibleSections().forEach(loadSection);
   });
 
@@ -2384,6 +2432,7 @@ function trendSectionHtml(category, hidden = false) {
       <div class="trend-section-topics" data-trend-topic-list="${esc(category)}">${trendTopicsHtml(category)}</div>
     </div>
     <div class="trend-grid" data-trend-grid="${esc(category)}"></div>
+    <div class="trend-more-wrap"><button type="button" class="btn-outline" data-trend-more="${esc(category)}" hidden>Load more</button></div>
   </section>`;
 }
 
@@ -2394,10 +2443,13 @@ function trendEmpty(category, failed = false) {
   </div>`;
 }
 
-export function renderTrending({ period = 'week', category = 'All' } = {}) {
-  const selectedPeriod = TREND_PERIODS.some(([key]) => key === period) ? period : 'week';
+export function renderTrending({ period, category, sort } = {}) {
+  const prefs = store.trendingPref();
+  const selectedPeriod = TREND_PERIODS.some(([key]) => key === period) ? period : prefs.period;
   const categories = store.trendingCategoryNames();
-  const selectedCategory = categories.includes(category) ? category : 'All';
+  const requestedCategory = category || prefs.category;
+  const selectedCategory = categories.includes(requestedCategory) ? requestedCategory : 'All';
+  const selectedSort = sort === 'newest' || sort === 'views' ? sort : prefs.sort;
 
   return `<div class="trending-page">
     <div class="trend-toolbar">
@@ -2408,6 +2460,10 @@ export function renderTrending({ period = 'week', category = 'All' } = {}) {
             ([key, label]) =>
               `<button type="button" class="trend-period ${key === selectedPeriod ? 'active' : ''}" data-period="${key}" aria-pressed="${key === selectedPeriod}">${label}</button>`
           ).join('')}
+        </div>
+        <div class="trend-sorts" role="group" aria-label="Sort by">
+          <button type="button" class="trend-sort ${selectedSort === 'views' ? 'active' : ''}" data-sort="views">Most viewed</button>
+          <button type="button" class="trend-sort ${selectedSort === 'newest' ? 'active' : ''}" data-sort="newest">Newest</button>
         </div>
         <button type="button" class="trend-refresh" data-trend-refresh title="Refresh trending" aria-label="Refresh">${icon('refresh')}</button>
       </div>

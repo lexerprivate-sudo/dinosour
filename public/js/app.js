@@ -190,7 +190,15 @@ function localSuggestionRows(q) {
 function showSuggestions() {
   const q = searchInput.value.trim();
   searchClear.hidden = !q;
-  if (!q) return hideSuggestions();
+  if (!q) {
+    const recent = store.recentSearches().slice(0, 6);
+    if (!recent.length) return hideSuggestions();
+    paintSuggestions([
+      ...recent.map((label) => ({ type: 'recent', label, meta: 'Recent search', icon: 'history' })),
+      { type: 'clearRecent', label: 'Clear recent searches', meta: '', icon: 'trash' },
+    ]);
+    return;
+  }
 
   suggestionToken += 1;
   const localRows = APP_MODE ? [] : localSuggestionRows(q);
@@ -216,11 +224,18 @@ function showSuggestions() {
 function activateSuggestion(index) {
   const row = suggestionRows[index];
   if (!row) return;
+  if (row.type === 'clearRecent') {
+    store.clearSearchHistory();
+    hideSuggestions();
+    searchInput.focus();
+    return;
+  }
   hideSuggestions();
   searchInput.blur();
   if (row.type === 'video') navigate(`/watch/${row.id}`);
   else if (row.type === 'channel') navigate(`/channel/${row.id}`);
   else {
+    store.addSearch(row.label);
     searchInput.value = row.label;
     navigate(`/results?search_query=${encodeURIComponent(row.label)}`);
   }
@@ -234,9 +249,7 @@ function moveSuggestion(delta) {
 }
 
 searchInput.addEventListener('input', debounce(showSuggestions, 70));
-searchInput.addEventListener('focus', () => {
-  if (searchInput.value.trim()) showSuggestions();
-});
+searchInput.addEventListener('focus', () => showSuggestions());
 searchInput.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') {
     e.preventDefault();
@@ -262,6 +275,7 @@ searchForm.addEventListener('submit', (e) => {
     searchInput.focus();
     return;
   }
+  store.addSearch(q);
   hideSuggestions();
   searchInput.blur();
   navigate(`/results?search_query=${encodeURIComponent(q)}`);
@@ -1000,11 +1014,13 @@ function renderRoute() {
     };
     title = TITLES[seg[1]];
   } else if (seg[0] === 'feed' && seg[1] === 'trending') {
-    const period = url.searchParams.get('period') || 'week';
-    const category = url.searchParams.get('cat') || 'All';
-    html = renderTrending({ period, category });
+    const prefs = store.trendingPref();
+    const period = url.searchParams.get('period') || prefs.period;
+    const sort = url.searchParams.get('sort') || prefs.sort;
+    const category = url.searchParams.get('cat') || prefs.category;
+    html = renderTrending({ period, sort, category });
     mount = () => {
-      mountTrending(view, { period, category });
+      mountTrending(view, { period, sort, category });
     };
     title = category === 'All' ? 'Trending' : `${category} — Trending`;
   } else if (seg[0] === 'channel' && seg[1]) {

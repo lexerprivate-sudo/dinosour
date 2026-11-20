@@ -29,6 +29,8 @@ const defaults = {
   sleepTimer: 0,
   trendingTopics: {},
   trendingCustom: [],
+  trendingPrefs: {},
+  searchHistory: [],
 };
 
 /* The built-in Trending sections. Each becomes its own header with its own
@@ -277,6 +279,39 @@ export const store = {
       ...(this.state.trendingTopics || {}),
       [category]: this.trendingTopicsFor(category).filter((t) => t !== name),
     };
+    this.save();
+  },
+
+  /* Trending view preferences and recent searches (both local-only). */
+  trendingPref() {
+    const p = this.state.trendingPrefs || {};
+    return {
+      period: ['today', 'week', 'month', 'all'].includes(p.period) ? p.period : 'week',
+      sort: p.sort === 'newest' ? 'newest' : 'views',
+      category: typeof p.category === 'string' && p.category ? p.category : 'All',
+    };
+  },
+
+  setTrendingPref(part) {
+    this.state.trendingPrefs = { ...this.trendingPref(), ...part };
+    this.save();
+  },
+
+  recentSearches() {
+    return Array.isArray(this.state.searchHistory)
+      ? this.state.searchHistory.filter((s) => typeof s === 'string' && s).slice(0, 10)
+      : [];
+  },
+
+  addSearch(query) {
+    const q = String(query || '').trim().slice(0, 120);
+    if (!q) return;
+    this.state.searchHistory = [q, ...this.recentSearches().filter((s) => s.toLowerCase() !== q.toLowerCase())].slice(0, 12);
+    this.save();
+  },
+
+  clearSearchHistory() {
+    this.state.searchHistory = [];
     this.save();
   },
 

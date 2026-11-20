@@ -2365,6 +2365,25 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
 }
 .trend-period:hover { color: var(--text); background: var(--surface-3); }
 .trend-period.active { background: var(--red); color: #fff; }
+.trend-sorts {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border-radius: 9px;
+}
+.trend-sort {
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.trend-sort:hover { color: var(--text); background: var(--surface-3); }
+.trend-sort.active { background: var(--surface-3); color: var(--text); }
+
 .trend-refresh {
   width: 32px;
   height: 32px;
@@ -2451,6 +2470,8 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
 .trend-topic-add .icon { width: 13px; height: 13px; }
 
 .trend-grid { min-height: 60px; }
+.trend-more-wrap { display: flex; justify-content: center; padding: 16px 0 4px; }
+.trend-more-wrap .btn-outline { min-width: 130px; }
 .trend-loading { display: grid; place-items: center; min-height: 120px; }
 .trend-note { margin: 0 0 10px; color: var(--text-2); font-size: 13px; }
 .trend-empty {
