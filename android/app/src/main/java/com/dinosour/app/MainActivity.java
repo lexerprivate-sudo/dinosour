@@ -117,8 +117,9 @@ public class MainActivity extends Activity {
     offline = findViewById(R.id.offline);
     offlineMsg = findViewById(R.id.offlineMsg);
     retryBtn = findViewById(R.id.retryBtn);
-    playerView = findViewById(R.id.playerView);
-    connectPlayer();
+    // The native player is created lazily on the first playVideo call. Nothing
+    // media3-related is touched at launch: if anything in the media stack is
+    // unavailable on a device, it must never take down the main WebView UI.
 
     WebSettings settings = web.getSettings();
     settings.setJavaScriptEnabled(true);
@@ -706,11 +707,18 @@ public class MainActivity extends Activity {
     public void playVideo(final String id) {
       if (id == null || id.isEmpty()) return;
       ui.post(() -> {
-        connectPlayer();
-        Intent intent = new Intent(MainActivity.this, PlayerService.class);
-        intent.putExtra(PlayerService.EXTRA_VIDEO_URL, "https://www.youtube.com/watch?v=" + id);
-        startService(intent);
-        if (playerView != null) playerView.setVisibility(View.VISIBLE);
+        try {
+          connectPlayer();
+          Intent intent = new Intent(MainActivity.this, PlayerService.class);
+          intent.putExtra(PlayerService.EXTRA_VIDEO_URL, "https://www.youtube.com/watch?v=" + id);
+          startService(intent);
+          PlayerView surface = ensurePlayerView();
+          if (surface != null) surface.setVisibility(View.VISIBLE);
+        } catch (Throwable error) {
+          // The video page stays usable (the WebView embed path) if the native
+          // player cannot be started on this device.
+          if (playerView != null) playerView.setVisibility(View.GONE);
+        }
       });
     }
 
@@ -718,23 +726,52 @@ public class MainActivity extends Activity {
     @JavascriptInterface
     public void stopPlayer() {
       ui.post(() -> {
-        if (playerView != null) playerView.setVisibility(View.GONE);
-        stopService(new Intent(MainActivity.this, PlayerService.class));
+        try {
+          if (playerView != null) playerView.setVisibility(View.GONE);
+          stopService(new Intent(MainActivity.this, PlayerService.class));
+        } catch (Throwable ignored) {
+        }
       });
     }
   }
 
+  /** Creates the media3 surface only when playback is actually requested. */
+  private PlayerView ensurePlayerView() {
+    if (playerView != null) return playerView;
+    if (root == null) return null;
+    try {
+      playerView = new PlayerView(this);
+      playerView.setVisibility(View.GONE);
+      root.addView(playerView, new FrameLayout.LayoutParams(
+          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    } catch (Throwable error) {
+      playerView = null;
+    }
+    return playerView;
+  }
+
+  /**
+   * Connects to the native player service. Never called from onCreate — all
+   * media3 work is deferred until the user actually starts a video, and any
+   * failure is contained here instead of crashing the app.
+   */
   private void connectPlayer() {
     if (mediaControllerFuture != null) return;
-    SessionToken token = new SessionToken(this, new ComponentName(this, PlayerService.class));
-    mediaControllerFuture = new MediaController.Builder(this, token).buildAsync();
-    mediaControllerFuture.addListener(() -> {
-      try {
-        mediaController = mediaControllerFuture.get();
-        if (playerView != null) playerView.setPlayer(mediaController);
-      } catch (Exception ignored) {
-      }
-    }, Runnable::run);
+    try {
+      SessionToken token = new SessionToken(this, new ComponentName(this, PlayerService.class));
+      mediaControllerFuture = new MediaController.Builder(this, token).buildAsync();
+      mediaControllerFuture.addListener(() -> {
+        try {
+          mediaController = mediaControllerFuture.get();
+          PlayerView surface = ensurePlayerView();
+          if (surface != null) surface.setPlayer(mediaController);
+        } catch (Throwable ignored) {
+        }
+      }, ui::post);
+    } catch (Throwable error) {
+      mediaControllerFuture = null;
+      mediaController = null;
+    }
   }
 
   private void startMedia(boolean playing, String title, String channel) {
@@ -914,6 +951,14 @@ public class MainActivity extends Activity {
   protected void onDestroy() {
     instance = new WeakReference<>(null);
     stopMediaService();
+    try {
+      if (mediaControllerFuture != null) MediaController.releaseFuture(mediaControllerFuture);
+      if (playerView != null) {
+        playerView.setPlayer(null);
+        playerView = null;
+      }
+    } catch (Throwable ignored) {
+    }
     io.shutdownNow();
     if (web != null) {
       web.loadUrl("about:blank");

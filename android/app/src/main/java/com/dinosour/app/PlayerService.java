@@ -26,8 +26,14 @@ public class PlayerService extends MediaSessionService {
     @Override
     public void onCreate() {
         super.onCreate();
-        ExoPlayer player = new ExoPlayer.Builder(this).build();
-        session = new MediaSession.Builder(this, player).build();
+        try {
+            ExoPlayer player = new ExoPlayer.Builder(this).build();
+            session = new MediaSession.Builder(this, player).build();
+        } catch (Throwable error) {
+            // An incomplete media stack must never crash the whole app process.
+            session = null;
+            stopSelf();
+        }
     }
 
     @Override
@@ -44,6 +50,7 @@ public class PlayerService extends MediaSessionService {
         if (url == null) return START_STICKY;
         new Thread(() -> {
             try {
+                if (session == null) return;
                 StreamInfo info = StreamInfo.getInfo(ServiceList.YouTube, url);
                 String streamUrl = null;
                 if (info.getVideoStreams() != null && !info.getVideoStreams().isEmpty()) {
@@ -60,7 +67,7 @@ public class PlayerService extends MediaSessionService {
                 session.getPlayer().setMediaItem(item);
                 session.getPlayer().prepare();
                 session.getPlayer().play();
-            } catch (Exception ignored) {
+            } catch (Throwable ignored) {
             }
         }).start();
         return START_STICKY;
