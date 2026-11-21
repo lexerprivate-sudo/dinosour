@@ -1267,8 +1267,12 @@ export function mountRemoteWatch(root, id) {
     if (!current || current.id !== acctParam) {
       store.setAccountFilter(acctParam, meta.channel || acctParam);
     }
-  } else if (store.accountFilter()) {
-    store.clearAccountFilter();
+  } else {
+    const previousAccount = store.accountFilter();
+    if (previousAccount) store.clearAccountFilter();
+    // Account-originated queue entries must not follow the user out of the
+    // account page; otherwise Up Next stays stuck on that one channel.
+    store.clearAccountQueue(previousAccount?.name || '');
   }
 
   const rateBtn = root.querySelector('[data-yt-rate]');
@@ -1525,7 +1529,7 @@ export function mountRemoteWatch(root, id) {
       const data = await searchYouTube(filter.name);
       const more = (data.videos || []).filter((v) => accountMatches(v) && v.id !== id);
       if (more.length) {
-        store.addManyToQueue(more);
+        store.addManyToQueue(more, 'account:' + filter.id);
         paintQueue();
       }
     } catch {
@@ -1540,8 +1544,10 @@ export function mountRemoteWatch(root, id) {
     const empty = root.querySelector('[data-queue-empty]');
     const clear = root.querySelector('[data-queue-clear]');
     const queue = store.queueList();
-    if (list) list.innerHTML = queue.map(queueItemHtml).join('');
-    if (empty) empty.hidden = queue.length > 0;
+    // With no explicit queue, show similar videos as the suggested Up Next.
+    const shown = queue.length ? queue : relatedVideos.slice(0, 6);
+    if (list) list.innerHTML = shown.map(queueItemHtml).join('');
+    if (empty) empty.hidden = shown.length > 0;
     if (clear) clear.hidden = queue.length === 0;
     if (store.accountFilter()) topUpAccountQueue();
   };
@@ -2100,7 +2106,12 @@ export function mountRemoteWatch(root, id) {
     const relatedEl = root.querySelector('[data-yt-related-list]');
     if (!relatedEl) return;
 
-    const seed = channel || root.dataset.query || '';
+    // Topic of the video the user clicked first; the channel is only a
+    // fallback. This makes Up Next similar to what was watched/searched.
+    const titleSeed = String(meta.title || '').replace(/\s*\|.*$/, '').trim();
+    const seed = titleSeed && titleSeed !== 'YouTube video'
+      ? titleSeed
+      : (channel || root.dataset.query || '');
     if (!seed) {
       relatedEl.innerHTML = '<p class="related-empty">No related videos found.</p>';
       return;
@@ -2112,6 +2123,7 @@ export function mountRemoteWatch(root, id) {
       // Related videos stay normal — account mode only restricts autoplay.
       const videos = (data.videos || []).filter((v) => v.id !== id).slice(0, 12);
       relatedVideos = videos;
+      paintQueue();
       relatedEl.innerHTML = videos.length
         ? videos.map(ytRelItemHtml).join('')
         : '<p class="related-empty">No related videos found.</p>';
@@ -2739,7 +2751,7 @@ export async function mountAccount(root, { id, name } = {}) {
   });
 
   root.querySelector('[data-acct-addall]')?.addEventListener('click', () => {
-    const added = store.addManyToQueue(videos);
+    const added = store.addManyToQueue(videos, `account:${id}`);
     setStatus(added ? `Added ${added} videos to Up Next.` : 'Those videos are already queued.');
   });
 
@@ -2747,7 +2759,7 @@ export async function mountAccount(root, { id, name } = {}) {
     if (!videos.length) return;
     store.setAccountFilter(id, label);
     store.clearQueue();
-    store.addManyToQueue(videos.slice(1));
+    store.addManyToQueue(videos.slice(1), `account:${id}`);
     paintToggle();
     navigate(`/watch/yt/${encodeURIComponent(videos[0].id)}?autoplay=1`);
   });
@@ -2770,8 +2782,8 @@ export async function mountAccount(root, { id, name } = {}) {
       thumb: el.dataset.qThumb,
       length: el.dataset.qLength,
     };
-    if (next) store.playNextVideo(video);
-    else store.addToQueue(video);
+    if (next) store.playNextVideo(video, `account:${id}`);
+    else store.addToQueue(video, `account:${id}`);
     setStatus(next ? 'Will play next.' : 'Added to Up Next.');
   });
 

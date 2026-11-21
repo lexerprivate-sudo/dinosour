@@ -387,7 +387,7 @@ export const store = {
     return this.queueList().some((v) => v.id === id);
   },
 
-  addToQueue(video) {
+  addToQueue(video, source = '') {
     if (!video || !video.id) return false;
     const entry = {
       id: video.id,
@@ -395,6 +395,7 @@ export const store = {
       channel: video.channel || 'YouTube',
       thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
       length: video.length || '',
+      source,
     };
     // Native clients (LibreTube PlayingQueue.add) move an existing copy to the
     // tail instead of silently doing nothing.
@@ -433,8 +434,25 @@ export const store = {
     this.save();
   },
 
+  /** Drops videos that were queued from an account page. */
+  clearAccountQueue(name = '') {
+    const before = this.queueList();
+    const lower = String(name || '').toLowerCase();
+    const kept = before.filter((v) => {
+      if (String(v.source || '').startsWith('account:')) return false;
+      // Older builds did not tag queue entries; match by channel name too.
+      if (lower && String(v.channel || '').toLowerCase() === lower) return false;
+      return true;
+    });
+    if (kept.length === before.length) return 0;
+    this.state.queue = kept;
+    this.state.nextCursor = 0;
+    this.save();
+    return before.length - kept.length;
+  },
+
   /** Adds several videos in one write; returns how many were new. */
-  addManyToQueue(videos) {
+  addManyToQueue(videos, source = '') {
     let added = 0;
     const list = this.queueList();
     const seen = new Set(list.map((v) => v.id));
@@ -447,6 +465,7 @@ export const store = {
         channel: String(video.channel || 'YouTube').slice(0, 120),
         thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
         length: String(video.length || ''),
+        source,
       });
       added += 1;
     }
@@ -459,7 +478,7 @@ export const store = {
    * Inserts a video so it plays next. A cursor keeps repeated "Play next"
    * clicks in click order instead of reversing them (REA finding).
    */
-  playNextVideo(video) {
+  playNextVideo(video, source = '') {
     if (!video?.id) return false;
     const without = this.queueList().filter((v) => v.id !== video.id);
     const cursor = Math.min(Number(this.state.nextCursor) || 0, without.length);
@@ -469,6 +488,7 @@ export const store = {
       channel: video.channel || 'YouTube',
       thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
       length: video.length || '',
+      source,
     });
     this.state.queue = without.slice(0, 30);
     this.state.nextCursor = cursor + 1;
