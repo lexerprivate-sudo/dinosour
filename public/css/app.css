@@ -2499,6 +2499,25 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
 
 .account-link { color: inherit; text-decoration: none; }
 .account-link:hover { color: var(--blue); }
+.account-avatar { display: inline-flex; flex: none; border-radius: 50%; }
+.account-avatar .avatar { display: grid; place-items: center; }
+.account-avatar:hover .avatar { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.watch-channel-row { margin: 14px 0 6px; }
+.watch-channel-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px 5px 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.watch-channel-link:hover { background: var(--surface-3); color: var(--blue); }
+.watch-channel-link .avatar { width: 30px; height: 30px; font-size: 12px; }
 .card-channel .account-link.name { color: var(--text-2); }
 .card-channel .account-link.name:hover { color: var(--blue); }
 

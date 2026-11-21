@@ -1039,20 +1039,21 @@ export async function mountResults(root, query) {
   await load(false);
 }
 
-function ytCardHtml(v, extra = '') {
+function ytCardHtml(v, extra = '', linkSuffix = '') {
   const channel = v.channel || 'YouTube';
   const meta = [v.viewsText, v.publishedText].filter(Boolean).join(' · ');
+  const accountHref = `/channel/${encodeURIComponent(v.channelId || channel)}?yt=1&name=${encodeURIComponent(channel)}`;
   return `<article class="card yt-card">
-  <a class="card-thumb-link" href="/watch/yt/${encodeURIComponent(v.id)}" data-link aria-hidden="true" tabindex="-1">
+  <a class="card-thumb-link" href="/watch/yt/${encodeURIComponent(v.id)}${linkSuffix}" data-link aria-hidden="true" tabindex="-1">
     <div class="thumb">
       <img src="${esc(v.thumb)}" alt="" loading="lazy" width="640" height="360">
       ${v.length ? `<span class="duration">${esc(v.length)}</span>` : ''}
     </div>
   </a>
   <div class="card-details">
-    ${avatar({ name: channel, color: colorFor(channel) })}
+    <a class="account-avatar" href="${accountHref}" data-link title="See all ${esc(channel)} videos">${avatar({ name: channel, color: colorFor(channel) })}</a>
     <div class="card-text">
-      <a href="/watch/yt/${encodeURIComponent(v.id)}" data-link><h3 class="card-title">${esc(v.title)}</h3></a>
+      <a href="/watch/yt/${encodeURIComponent(v.id)}${linkSuffix}" data-link><h3 class="card-title">${esc(v.title)}</h3></a>
       <div class="card-channel"><a class="name account-link" href="/channel/${encodeURIComponent(v.channelId || channel)}?yt=1&name=${encodeURIComponent(channel)}" data-link title="Only ${esc(channel)} videos">${esc(channel)}</a></div>
       ${meta ? `<div class="card-meta">${esc(meta)}</div>` : ''}
     </div>
@@ -1100,8 +1101,8 @@ function queueItemHtml(v) {
   </div>`;
 }
 
-function ytEndItemHtml(v) {
-  return `<a class="end-related-item" href="/watch/yt/${encodeURIComponent(v.id)}?autoplay=1" data-link>
+function ytEndItemHtml(v, suffix = '') {
+  return `<a class="end-related-item" href="/watch/yt/${encodeURIComponent(v.id)}?autoplay=1${suffix}" data-link>
     <span class="end-related-thumb"><img src="${esc(v.thumb)}" alt="" loading="lazy" width="160" height="90"></span>
     <span class="end-related-title">${esc(v.title)}</span>
   </a>`;
@@ -1204,6 +1205,7 @@ export function renderRemoteWatch(id, info = null) {
         </div>
       </div>
 
+      <div class="watch-channel-row" data-yt-channel-row></div>
       <h1 class="watch-title" data-yt-title>${esc(title)}</h1>
 
       <div class="watch-meta-row">
@@ -1256,6 +1258,18 @@ export function mountRemoteWatch(root, id) {
     channel: saved?.channel || '',
     thumb: saved?.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(id)}/mqdefault.jpg`,
   };
+
+  /* Account-only autoplay is scoped to videos opened from an account page.
+     Opening an ordinary video clears it so related videos stay unfiltered. */
+  const acctParam = new URLSearchParams(location.search).get('acct');
+  if (acctParam) {
+    const current = store.accountFilter();
+    if (!current || current.id !== acctParam) {
+      store.setAccountFilter(acctParam, meta.channel || acctParam);
+    }
+  } else if (store.accountFilter()) {
+    store.clearAccountFilter();
+  }
 
   const rateBtn = root.querySelector('[data-yt-rate]');
   const qualityBtn = root.querySelector('[data-yt-quality]');
@@ -1546,9 +1560,9 @@ export function mountRemoteWatch(root, id) {
     const filter = store.accountFilter();
     const queue = store.queueList();
     if (filter) {
-      const inAccount = queue.find(accountMatches);
-      if (inAccount) return inAccount;
-      return relatedVideos.find(accountMatches) || null;
+      // Only queued videos from this account advance automatically; the
+      // related rail is still shown in full for the video the user clicked.
+      return queue.find(accountMatches) || null;
     }
     return queue[0] || relatedVideos[0] || null;
   };
@@ -1562,12 +1576,17 @@ export function mountRemoteWatch(root, id) {
     if (bar) bar.style.width = '0%';
   };
 
+  const accountSuffix = () => {
+    const filter = store.accountFilter();
+    return filter ? `&acct=${encodeURIComponent(filter.id)}` : '';
+  };
+
   const playNext = (video = nextUp()) => {
     if (!video?.id || destroyed) return;
     hideEndCard();
     store.removeFromQueue(video.id);
     save(true);
-    navigate(`/watch/yt/${encodeURIComponent(video.id)}?autoplay=1`);
+    navigate(`/watch/yt/${encodeURIComponent(video.id)}?autoplay=1${accountSuffix()}`);
   };
 
   const replay = () => {
@@ -1598,12 +1617,11 @@ export function mountRemoteWatch(root, id) {
 
     // "Also next": whatever is queued, then the related rail, without repeats.
     const also = [...store.queueList(), ...relatedVideos]
-      .filter(accountMatches)
       .filter((v) => v.id !== id && v.id !== next?.id)
       .filter((v, i, all) => all.findIndex((x) => x.id === v.id) === i)
       .slice(0, 3);
     const alsoEl = endCard.querySelector('[data-end-related]');
-    if (alsoEl) alsoEl.innerHTML = also.map(ytEndItemHtml).join('');
+    if (alsoEl) alsoEl.innerHTML = also.map((v) => ytEndItemHtml(v, accountSuffix())).join('');
 
     if (!next) {
       label.textContent = 'Finished';
@@ -1627,7 +1645,7 @@ export function mountRemoteWatch(root, id) {
     thumb.src = next.thumb;
     thumb.alt = '';
     links.forEach((a) => {
-      a.href = `/watch/yt/${encodeURIComponent(next.id)}?autoplay=1`;
+      a.href = `/watch/yt/${encodeURIComponent(next.id)}?autoplay=1${accountSuffix()}`;
     });
     play.hidden = false;
     replayBtn.hidden = true;
@@ -2058,6 +2076,12 @@ export function mountRemoteWatch(root, id) {
       channel = info.channel || '';
       meta.title = info.title || meta.title;
       meta.channel = info.channel || meta.channel;
+      const chRow = root.querySelector('[data-yt-channel-row]');
+      if (chRow && meta.channel) {
+        const accId = info.channelId || meta.channel;
+        const href = `/channel/${encodeURIComponent(accId)}?yt=1&name=${encodeURIComponent(meta.channel)}`;
+        chRow.innerHTML = `<a class="watch-channel-link account-link" href="${href}" data-link title="See all ${esc(meta.channel)} videos">${avatar({ name: meta.channel, color: colorFor(meta.channel) })}<span>${esc(meta.channel)}</span></a>`;
+      }
       const titleEl = root.querySelector('[data-yt-title]');
       if (titleEl) titleEl.textContent = info.title;
       document.title = `${info.title} — dinosour`;
@@ -2085,7 +2109,8 @@ export function mountRemoteWatch(root, id) {
     try {
       const data = await searchYouTube(seed);
       if (destroyed || !playerEl?.isConnected) return;
-      const videos = (data.videos || []).filter((v) => v.id !== id && accountMatches(v)).slice(0, 12);
+      // Related videos stay normal — account mode only restricts autoplay.
+      const videos = (data.videos || []).filter((v) => v.id !== id).slice(0, 12);
       relatedVideos = videos;
       relatedEl.innerHTML = videos.length
         ? videos.map(ytRelItemHtml).join('')
@@ -2606,12 +2631,13 @@ export function mountChannel(root, id) {
 
 /* ============================================================ account */
 
-function accountVideoHtml(v) {
+function accountVideoHtml(v, accountId) {
   const actions = `<div class="account-actions">
     <button type="button" class="btn-outline btn-xs" data-acct-next ${queueAttrs(v)}>Play next</button>
     <button type="button" class="btn-outline btn-xs" data-acct-add ${queueAttrs(v)}>Add to queue</button>
   </div>`;
-  return ytCardHtml(v, actions);
+  const suffix = accountId ? `?acct=${encodeURIComponent(accountId)}` : '';
+  return ytCardHtml(v, actions, suffix);
 }
 
 export function renderAccount({ id, name } = {}) {
@@ -2666,7 +2692,7 @@ export async function mountAccount(root, { id, name } = {}) {
 
   const paint = () => {
     grid.innerHTML = videos.length
-      ? videos.map(accountVideoHtml).join('')
+      ? videos.map((v) => accountVideoHtml(v, id)).join('')
       : '<p class="related-empty">No videos found for this account yet.</p>';
   };
 
