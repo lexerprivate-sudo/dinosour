@@ -15,8 +15,10 @@ export function isAppVisible() {
    YouTube can auto-pause a hidden embed, so the players use this signal to
    retry playVideo only while the app is actually backgrounded. */
 export function setAppVisible(next) {
-  appVisible = !!next;
-  window.dispatchEvent(new CustomEvent('dinosour:appvisibility', { detail: { visible: appVisible } }));
+  const value = !!next;
+  if (value === appVisible) return;
+  appVisible = value;
+  window.dispatchEvent(new CustomEvent('dinosour:appvisibility', { detail: { visible: value } }));
 }
 
 /* The watch page or the mini player registers itself here so that lock-screen
@@ -34,8 +36,8 @@ export function clearMediaTarget(which) {
 export function reportMedia(playing, title, channel) {
   const bridge = api();
   if (!bridge || !bridge.mediaState) return;
-  if (title) lastTitle = title;
-  if (channel) lastChannel = channel;
+  if (typeof title === 'string') lastTitle = title;
+  if (typeof channel === 'string') lastChannel = channel;
   bridge.mediaState(playing, lastTitle, lastChannel);
 }
 
@@ -45,12 +47,17 @@ export function stopMedia() {
 }
 
 /* Commands from the native notification / lock screen. */
+let lastStopAt = 0;
 export function onMediaCommand(action) {
   if (action === 'play') target?.play?.();
   else if (action === 'pause') target?.pause?.();
   else if (action === 'next') target?.next?.();
   else if (action === 'stop') {
+    // ACTION_STOP already ends in a native mediaStop() from the player; calling
+    // it here too made the two sides ping-pong stop commands. Dedupe regardless.
+    const now = Date.now();
+    if (now - lastStopAt < 500) return;
+    lastStopAt = now;
     target?.stop?.();
-    stopMedia();
   }
 }

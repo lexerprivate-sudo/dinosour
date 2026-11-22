@@ -20,6 +20,7 @@ const defaults = {
   topics: [],
   resume: [],
   queue: [],
+  watchTrail: [],
   ytHistory: [],
   ytLiked: [],
   ytSaved: [],
@@ -104,15 +105,52 @@ function read() {
   }
 }
 
+/* Normalized filter terms are rebuilt only when the source arrays change.
+   isFiltered runs for every card in every feed, so this avoids allocating two
+   arrays and lowercasing every term hundreds of times per render. */
+let filterCache = { kwSource: null, kw: [], chSource: null, ch: [] };
+function normalizedFilters(state) {
+  if (filterCache.kwSource !== state.hiddenKeywords) {
+    filterCache.kwSource = state.hiddenKeywords;
+    filterCache.kw = (Array.isArray(state.hiddenKeywords) ? state.hiddenKeywords : [])
+      .filter((k) => typeof k === 'string' && k)
+      .map((k) => k.toLowerCase());
+  }
+  if (filterCache.chSource !== state.hiddenChannels) {
+    filterCache.chSource = state.hiddenChannels;
+    filterCache.ch = (Array.isArray(state.hiddenChannels) ? state.hiddenChannels : [])
+      .filter((c) => typeof c === 'string' && c)
+      .map((c) => c.toLowerCase());
+  }
+  return filterCache;
+}
+
 export const store = {
   state: read(),
+  _saveTimer: null,
 
-  save() {
+  /* Mutators only mark the state dirty. One trailing write replaces the
+     dozens of full JSON.stringify + localStorage.setItem calls that volume
+     dragging and progress ticks used to trigger on the UI thread. */
+  flush() {
+    if (this._saveTimer) {
+      clearTimeout(this._saveTimer);
+      this._saveTimer = null;
+    }
     try {
       localStorage.setItem(KEY, JSON.stringify(this.state));
     } catch {
       /* storage may be unavailable in private mode — app still works in memory */
     }
+    return this.state;
+  },
+
+  save() {
+    if (this._saveTimer) return this.state;
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null;
+      this.flush();
+    }, 250);
     return this.state;
   },
 
@@ -179,7 +217,16 @@ export const store = {
 
   setProgress(id, t, d) {
     if (!d || !Number.isFinite(t) || !Number.isFinite(d)) return;
+    const prev = this.state.progress[id];
+    if (prev && prev.d === d && Math.abs(prev.t - t) < 1) return;
     this.state.progress[id] = { t, d, at: Date.now() };
+    const ids = Object.keys(this.state.progress);
+    if (ids.length > 300) {
+      ids
+        .sort((a, b) => (this.state.progress[a].at || 0) - (this.state.progress[b].at || 0))
+        .slice(0, ids.length - 300)
+        .forEach((old) => delete this.state.progress[old]);
+    }
     this.save();
   },
 
@@ -385,7 +432,7 @@ export const store = {
   },
 
   queueList() {
-    return Array.isArray(this.state.queue) ? this.state.queue : [];
+    return Array.isArray(this.state.queue) ? this.state.queue.slice() : [];
   },
 
   inQueue(id) {
@@ -420,6 +467,23 @@ export const store = {
   clearQueue() {
     this.state.queue = [];
     this.save();
+  },
+
+  /** Previous-button history that survives navigation. */
+  pushWatchTrail(id) {
+    if (!id) return;
+    const trail = Array.isArray(this.state.watchTrail) ? this.state.watchTrail.filter((v) => v !== id) : [];
+    trail.push(id);
+    this.state.watchTrail = trail.slice(-30);
+    this.save();
+  },
+
+  popWatchTrail() {
+    const trail = Array.isArray(this.state.watchTrail) ? this.state.watchTrail.slice() : [];
+    const id = trail.pop();
+    this.state.watchTrail = trail;
+    this.save();
+    return id || null;
   },
 
   /** Repeat cycle follows NewPipe: Off -> One -> All -> Off. */
@@ -479,10 +543,12 @@ export const store = {
   /** True when a YouTube result should be filtered out. */
   isFiltered(video) {
     if (!video) return false;
+    const filters = normalizedFilters(this.state);
+    if (!filters.kw.length && !filters.ch.length) return false;
     const title = String(video.title || '').toLowerCase();
-    const channel = String(video.channel || '').toLowerCase();
-    if (this.hiddenChannels().some((c) => channel === c.toLowerCase())) return true;
-    return this.hiddenKeywords().some((k) => title.includes(k.toLowerCase()));
+    const channel = String(video.channel || '').toLowerCase().trim();
+    if (filters.ch.some((c) => channel.includes(c))) return true;
+    return filters.kw.some((k) => title.includes(k));
   },
 
   isShuffle() { return !!this.state.shuffle; },

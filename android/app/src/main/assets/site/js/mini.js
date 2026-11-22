@@ -19,6 +19,7 @@ let pausedAt = 0;
 let wantPlaying = false;
 let lastAdvance = 0;
 let lastNudge = 0;
+let lastResumeAt = 0;
 let keepAliveTimer = null;
 
 let track = {
@@ -51,6 +52,7 @@ const mediaTarget = {
     pausedByUser = false;
     wantPlaying = true;
     lastAdvance = Date.now();
+    lastResumeAt = Date.now();
     setMiniPlaying(true);
     send({ event: 'command', func: 'playVideo', args: [] });
   },
@@ -81,6 +83,10 @@ function onAppVisibility(event) {
   const visible = !!event.detail?.visible;
   if (visible) {
     lastNudge = 0;
+    if (keepAliveTimer) {
+      clearInterval(keepAliveTimer);
+      keepAliveTimer = null;
+    }
     return;
   }
   if (pausedByUser || !frame) return;
@@ -88,7 +94,9 @@ function onAppVisibility(event) {
   if (!recentlyPlaying) return;
   wantPlaying = true;
   lastAdvance = Date.now();
+  lastResumeAt = Date.now();
   lastNudge = 0;
+  if (!keepAliveTimer) keepAliveTimer = setInterval(nudgePlayback, 2000);
   send({ event: 'command', func: 'playVideo', args: [] });
 }
 
@@ -181,11 +189,13 @@ function onMessage(event) {
     if (!isAppVisible()) {
       if (wantPlaying && !pausedByUser) lastAdvance = 0;
     } else {
-      wantPlaying = false;
+      // Ignore a stale "paused" that arrives right after an explicit resume;
+      // it used to disarm the background keep-alive and kill audio later.
+      if (Date.now() - lastResumeAt > 1200) {
+        wantPlaying = false;
+        setMiniPlaying(false);
+      }
     }
-    // Paused right now, but not necessarily paused by the user. Leave the flag
-    // alone so a stale progress tick cannot be mistaken for a resume.
-    setMiniPlaying(false);
   }
 }
 
@@ -269,6 +279,7 @@ export function openMini(video) {
 
   miniEl.querySelector('[data-mini-close]').addEventListener('click', () => closeMini());
   frame.addEventListener('load', () => {
+    clearTimeout(timer);
     tries = 0;
     ping();
   });
@@ -290,6 +301,6 @@ export function openMini(video) {
   document.addEventListener('visibilitychange', onHide);
   window.addEventListener('pagehide', onPageHide);
   window.addEventListener('dinosour:appvisibility', onAppVisibility);
-  keepAliveTimer = setInterval(nudgePlayback, 2000);
+  if (!isAppVisible()) keepAliveTimer = setInterval(nudgePlayback, 2000);
   setMediaTarget(mediaTarget);
 }

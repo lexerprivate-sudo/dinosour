@@ -10,7 +10,10 @@ import android.graphics.Rect;
 import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -25,7 +28,6 @@ import com.google.common.util.concurrent.ListenableFuture;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
 
 /**
  * Standalone player surface. The ExoPlayer lives in PlayerService, so this
@@ -44,6 +46,7 @@ public class PlayerActivity extends AppCompatActivity {
     private Button pipButton;
     private PipReceiver receiver;
     private String videoId;
+    private String lastStartedVideoId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,21 +75,61 @@ public class PlayerActivity extends AppCompatActivity {
         } catch (Throwable ignored) {
         }
 
+        // Double-tap the native surface to seek +/- 10 seconds. Only the second
+        // UP is consumed, so Media3's own controls keep working normally.
+        final long[] lastTapAt = {0L};
+        playerView.setOnTouchListener((v, event) -> {
+            if (event.getActionMasked() != MotionEvent.ACTION_UP) return false;
+            long now = SystemClock.uptimeMillis();
+            if (now - lastTapAt[0] >= ViewConfiguration.get(this).getDoubleTapTimeout()) {
+                lastTapAt[0] = now;
+                return false;
+            }
+            lastTapAt[0] = 0L;
+            if (controller == null) return false;
+            try {
+                long pos = controller.getCurrentPosition();
+                long duration = controller.getDuration();
+                long target = pos + (pos > 3000 ? -10000L : 10000L);
+                if (target < 0) target = 0;
+                if (duration > 0 && target > duration) target = duration;
+                controller.seekTo(target);
+            } catch (Throwable ignored) {
+            }
+            return true;
+        });
+
         connectPlayer();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String next = intent.getStringExtra(EXTRA_VIDEO_ID);
+        if (next != null && !next.equals(videoId)) {
+            videoId = next;
+            lastStartedVideoId = null;
+            startVideo();
+        }
+    }
+
+    private void startVideo() {
+        if (videoId == null || videoId.isEmpty() || videoId.equals(lastStartedVideoId)) return;
+        lastStartedVideoId = videoId;
+        Intent intent = new Intent(this, PlayerService.class);
+        intent.putExtra(PlayerService.EXTRA_VIDEO_URL,
+                "https://www.youtube.com/watch?v=" + videoId);
+        try {
+            startService(intent);
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override
     protected void onStart() {
         super.onStart();
-        if (videoId != null && !videoId.isEmpty()) {
-            Intent intent = new Intent(this, PlayerService.class);
-            intent.putExtra(PlayerService.EXTRA_VIDEO_URL,
-                    "https://www.youtube.com/watch?v=" + videoId);
-            try {
-                startService(intent);
-            } catch (Throwable ignored) {
-            }
-        }
+        startVideo();
     }
 
     private void connectPlayer() {
@@ -100,7 +143,7 @@ public class PlayerActivity extends AppCompatActivity {
                     playerView.setPlayer(controller);
                 } catch (Throwable ignored) {
                 }
-            }, Executors.newSingleThreadExecutor());
+            }, this::runOnUiThread);
         } catch (Throwable ignored) {
         }
     }
@@ -146,7 +189,9 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     public void onUserLeaveHint() {
         super.onUserLeaveHint();
-        if (controller != null && controller.getPlayWhenReady()) enterPip();
+        // API 31+ auto-enter already handles this; doing it manually causes a
+        // double transition and visible flicker.
+        if (Build.VERSION.SDK_INT < 31 && controller != null && controller.getPlayWhenReady()) enterPip();
     }
 
     @Override
@@ -164,8 +209,8 @@ public class PlayerActivity extends AppCompatActivity {
             if (receiver != null) unregisterReceiver(receiver);
         } catch (Throwable ignored) {
         }
+        if (playerView != null) playerView.setPlayer(null);
         if (controllerFuture != null) MediaController.releaseFuture(controllerFuture);
-        playerView.setPlayer(null);
         super.onDestroy();
     }
 

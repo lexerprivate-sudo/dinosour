@@ -235,7 +235,6 @@ body.mini .view { margin-left: var(--mini-w); }
   inset: 0;
   background: rgba(0,0,0,.5);
   z-index: 110;
-  backdrop-filter: blur(1px);
 }
 
 .mobile-nav { display: none; }
@@ -732,6 +731,9 @@ body.sheet-open { overflow: hidden; }
 }
 
 .card { position: relative; min-width: 0; }
+/* Bound layout work when feeds grow or the sidebar animates. */
+.grid, .yt-list, .related, .up-next-list, .playlist-grid, .resume-track, .shorts-track { contain: layout style; }
+.skel::after { will-change: transform; }
 .card-thumb-link { display: block; }
 .thumb {
   position: relative;
@@ -852,7 +854,6 @@ body.sheet-open { overflow: hidden; }
   opacity: 0;
   transform: scale(.9);
   transition: opacity .15s ease, transform .15s ease, background .15s ease;
-  backdrop-filter: blur(4px);
 }
 .card-menu .icon { width: 20px; height: 20px; }
 .card:hover .card-menu, .card:focus-within .card-menu { opacity: 1; transform: scale(1); }
@@ -1620,6 +1621,7 @@ input[type="range"].vol::-moz-range-thumb { width: 12px; height: 12px; border: 0
   cursor: pointer; opacity: 0; transition: opacity .15s ease;
 }
 .card:hover .yt-card-hide { opacity: 1; }
+@media (hover: none) { .yt-card-hide { opacity: 1; } }
 .yt-card-hide:hover { background: rgba(224, 30, 46, .9); }
 .settings-filters { margin-top: 4px; }
 .local-hits { margin-bottom: 34px; }
@@ -2341,8 +2343,7 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
   position: sticky;
   top: var(--header-h);
   z-index: 60;
-  background: color-mix(in srgb, var(--bg) 94%, transparent);
-  backdrop-filter: blur(12px);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 .trend-toolbar-top {

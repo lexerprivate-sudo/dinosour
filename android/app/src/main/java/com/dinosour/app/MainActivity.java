@@ -6,6 +6,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ComponentCallbacks2;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -130,7 +131,7 @@ public class MainActivity extends Activity {
     settings.setDomStorageEnabled(true);
     settings.setDatabaseEnabled(true);
     settings.setMediaPlaybackRequiresUserGesture(false);
-    settings.setLoadWithOverviewMode(true);
+    settings.setLoadWithOverviewMode(false);
     settings.setUseWideViewPort(true);
     settings.setSupportZoom(false);
     settings.setBuiltInZoomControls(false);
@@ -147,7 +148,8 @@ public class MainActivity extends Activity {
 
     web.setBackgroundColor(Color.parseColor("#0F0F0F"));
     web.setOverScrollMode(View.OVER_SCROLL_NEVER);
-    WebView.setWebContentsDebuggingEnabled(true);
+    WebView.setWebContentsDebuggingEnabled(
+            (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
     web.addJavascriptInterface(new Bridge(), "Dinosour");
 
     web.setWebViewClient(new WebViewClient() {
@@ -889,10 +891,13 @@ public class MainActivity extends Activity {
     final WebView view = web;
     if (view == null) return;
     ui.post(() -> {
-      if (web == null) return;
-      view.evaluateJavascript(
-          "window.__dinosourAppVisible&&window.__dinosourAppVisible(" + visible + ")",
-          null);
+      try {
+        view.evaluateJavascript(
+            "window.__dinosourAppVisible&&window.__dinosourAppVisible(" + visible + ")",
+            null);
+      } catch (Throwable ignored) {
+        /* WebView was destroyed between scheduling and running this call. */
+      }
     });
   }
 
@@ -998,8 +1003,11 @@ public class MainActivity extends Activity {
       checkedThisLaunch = true;
       // REA finding: forcing a GitHub API call on every launch can hit the
       // unauthenticated 60/hour rate limit. The normal 15-minute throttle is
-      // plenty for a release that ships once every few days.
-      checkForUpdate(false, false);
+      // plenty for a release that ships once every few days. Delay it until
+      // after first paint so it does not compete with the WebView's startup.
+      ui.postDelayed(() -> {
+        if (resumed) checkForUpdate(false, false);
+      }, 2000);
     } else {
       checkForUpdate();
     }
@@ -1009,7 +1017,8 @@ public class MainActivity extends Activity {
     long now = System.currentTimeMillis();
     if (now - lastMemEvent < 60000) return;
     lastMemEvent = now;
-    CrashLogger.recordEvent(this, what);
+    final Context app = getApplicationContext();
+    io.execute(() -> CrashLogger.recordEvent(app, what));
   }
 
   @Override

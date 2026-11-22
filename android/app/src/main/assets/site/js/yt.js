@@ -1,8 +1,9 @@
 /* Live YouTube search, suggestions and metadata (served by /api/*). */
 
 const memory = new Map();
+const pending = new Map();
 const MEMORY_TTL = 2 * 60 * 1000;
-const SEARCH_TIMEOUT = 15000;
+const SEARCH_TIMEOUT = 8000;
 const SUGGEST_TIMEOUT = 4000;
 
 function cacheGet(key) {
@@ -12,7 +13,19 @@ function cacheGet(key) {
     memory.delete(key);
     return null;
   }
+  // Refresh recency so hot entries survive eviction.
+  memory.delete(key);
+  memory.set(key, hit);
   return hit.value;
+}
+
+/* One in-flight request per key: typing, focus and route transitions used to
+   fire the same search several times concurrently. */
+function dedupe(key, fn) {
+  if (pending.has(key)) return pending.get(key);
+  const promise = Promise.resolve().then(fn).finally(() => pending.delete(key));
+  pending.set(key, promise);
+  return promise;
 }
 
 function cacheSet(key, value) {
@@ -22,6 +35,7 @@ function cacheSet(key, value) {
 
 async function getJson(url, { timeout = SEARCH_TIMEOUT, signal } = {}) {
   const controller = new AbortController();
+  if (signal?.aborted) controller.abort();
   const timer = setTimeout(() => controller.abort(), timeout);
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
@@ -56,28 +70,45 @@ export async function searchYouTube(query, { continuation = '', signal } = {}) {
   const cached = cacheGet(key);
   if (cached) return cached;
 
-  const params = new URLSearchParams({ q, continuation });
-  const data = await getJson(`/api/search?${params}`, { signal });
-  if (!Array.isArray(data.videos)) throw new Error('Unexpected search response');
+  return dedupe(`search:${key}`, async () => {
+    const params = new URLSearchParams({ q, continuation });
+    const data = await getJson(`/api/search?${params}`, { signal });
+    if (!Array.isArray(data.videos)) throw new Error('Unexpected search response');
 
-  const value = { ...data, videos: data.videos, channels: data.channels || [] };
-  cacheSet(key, value);
-  return value;
+    const value = { ...data, videos: data.videos, channels: data.channels || [] };
+    cacheSet(key, value);
+    return value;
+  });
 }
 
 export async function suggestYouTube(query, { signal } = {}) {
   const q = String(query || '').trim();
   if (!q) return [];
-  const data = await getJson(`/api/suggest?q=${encodeURIComponent(q)}`, {
-    timeout: SUGGEST_TIMEOUT,
-    signal,
-  }).catch(() => null);
-  return Array.isArray(data?.suggestions) ? data.suggestions : [];
+  const key = `suggest:${q.toLowerCase()}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+  return dedupe(key, async () => {
+    const data = await getJson(`/api/suggest?q=${encodeURIComponent(q)}`, {
+      timeout: SUGGEST_TIMEOUT,
+      signal,
+    }).catch(() => null);
+    const value = Array.isArray(data?.suggestions) ? data.suggestions : [];
+    cacheSet(key, value);
+    return value;
+  });
 }
 
 export async function videoInfo(id) {
-  const data = await getJson(`/api/video?id=${encodeURIComponent(id)}`, {
-    timeout: 10000,
-  }).catch(() => null);
-  return data && data.id === id ? data : null;
+  if (!id) return null;
+  const key = `video:${id}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+  return dedupe(key, async () => {
+    const data = await getJson(`/api/video?id=${encodeURIComponent(id)}`, {
+      timeout: 10000,
+    }).catch(() => null);
+    const value = data && data.id === id ? data : null;
+    if (value) cacheSet(key, value);
+    return value;
+  });
 }

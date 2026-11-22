@@ -1,9 +1,12 @@
 package com.dinosour.app;
 
+import android.app.PendingIntent;
 import android.content.Intent;
+import android.os.Build;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -24,10 +27,13 @@ public class PlayerService extends MediaSessionService {
     public static final String EXTRA_CHANNEL = "channel";
 
     private MediaSession session;
+    private volatile boolean destroyed = false;
+    private volatile boolean loading = false;
 
     @Override
     public void onCreate() {
         super.onCreate();
+        destroyed = false;
         try {
             // REA finding (NewPipe): ExoPlayer handles audio focus and wake
             // locks itself when configured; the app should not hand-roll them.
@@ -44,7 +50,13 @@ public class PlayerService extends MediaSessionService {
                         (androidx.media3.exoplayer.trackselection.DefaultTrackSelector) player.getTrackSelector();
                 ts.setParameters(ts.buildUponParameters().setTunnelingEnabled(true));
             }
-            session = new MediaSession.Builder(this, player).build();
+            int piFlags = PendingIntent.FLAG_UPDATE_CURRENT
+                    | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+            PendingIntent openPlayer = PendingIntent.getActivity(
+                    this, 0, new Intent(this, PlayerActivity.class), piFlags);
+            session = new MediaSession.Builder(this, player)
+                    .setSessionActivity(openPlayer)
+                    .build();
         } catch (Throwable error) {
             // An incomplete media stack must never crash the whole app process.
             session = null;
@@ -71,9 +83,11 @@ public class PlayerService extends MediaSessionService {
         final String title = intent.getStringExtra(EXTRA_TITLE);
         final String channel = intent.getStringExtra(EXTRA_CHANNEL);
         if (url == null) return START_STICKY;
+        loading = true;
         new Thread(() -> {
+            MediaSession ref = session;
             try {
-                if (session == null) {
+                if (destroyed || ref == null) {
                     MainActivity.notifyNativeFailure();
                     return;
                 }
@@ -93,12 +107,25 @@ public class PlayerService extends MediaSessionService {
                         .setArtist(channel != null ? channel : info.getUploaderName())
                         .build())
                     .build();
-                session.getPlayer().setMediaItem(item);
-                session.getPlayer().prepare();
-                session.getPlayer().play();
+                final MediaItem ready = item;
+                Player player = ref.getPlayer();
+                // ExoPlayer requires all calls on its own thread. Stop the old
+                // item first so switching videos cannot leave stale audio.
+                new android.os.Handler(player.getApplicationLooper()).post(() -> {
+                    if (destroyed || session != ref) return;
+                    try {
+                        player.stop();
+                        player.setMediaItem(ready);
+                        player.prepare();
+                        player.play();
+                    } catch (Throwable ignored) {
+                    }
+                });
             } catch (Throwable error) {
-                MainActivity.notifyNativeFailure();
+                if (!destroyed) MainActivity.notifyNativeFailure();
                 android.util.Log.w("DinosourPlayer", "stream extraction failed", error);
+            } finally {
+                loading = false;
             }
         }).start();
         return START_STICKY;
@@ -111,7 +138,7 @@ public class PlayerService extends MediaSessionService {
             // ViMusic/OnClearFromRecentService pattern: if nothing is playing,
             // swiping the app away stops the foreground service instead of
             // leaving an orphan notification.
-            if (session == null || !session.getPlayer().getPlayWhenReady()) {
+            if (session == null || loading || !session.getPlayer().getPlayWhenReady()) {
                 stopSelf();
             }
         } catch (Throwable ignored) {
@@ -120,10 +147,22 @@ public class PlayerService extends MediaSessionService {
 
     @Override
     public void onDestroy() {
-        if (session != null) {
-            session.getPlayer().release();
-            session.release();
-            session = null;
+        destroyed = true;
+        loading = false;
+        MediaSession ref = session;
+        session = null;
+        if (ref != null) {
+            Player player = ref.getPlayer();
+            try {
+                ref.release();
+            } catch (Throwable ignored) {
+            }
+            if (player != null) {
+                try {
+                    player.release();
+                } catch (Throwable ignored) {
+                }
+            }
         }
         super.onDestroy();
     }

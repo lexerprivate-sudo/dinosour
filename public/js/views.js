@@ -235,7 +235,7 @@ export async function mountTrending(root, { period, category, sort } = {}) {
     grid.innerHTML = visible.length
       ? `${note}<div class="grid">${visible.map(ytCardHtml).join('')}</div>`
       : trendEmpty(name, true);
-    if (more) more.hidden = visible.length >= ranked.length;
+    if (more) more.hidden = chosen.length >= ranked.length;
   };
 
   const refreshChips = (section) => {
@@ -416,21 +416,24 @@ async function mountFeed(root, seeds) {
   const tokens = new Map();
   let busy = false;
   let failed = false;
+  let exhausted = false;
   const alive = () => sentinel.isConnected;
 
   const paint = () => {
     loader.hidden = !busy;
-    end.hidden = !failed;
+    end.hidden = !failed && !exhausted;
+    if (retry) retry.hidden = exhausted;
   };
 
   const load = async () => {
-    if (busy || !alive()) return;
+    if (busy || exhausted || !alive()) return;
     busy = true;
     failed = false;
     paint();
 
     let added = 0;
     let attempts = 0;
+    let emptyRuns = 0;
     try {
       while (alive() && !added && attempts++ < 12) {
         // Rotate through the seeds so the feed never turns into one topic.
@@ -449,6 +452,12 @@ async function mountFeed(root, seeds) {
         if (fresh.length) {
           grid.insertAdjacentHTML('beforeend', fresh.map(ytCardHtml).join(''));
           added = fresh.length;
+          emptyRuns = 0;
+        } else if (!data.continuation && ++emptyRuns >= seeds.length) {
+          // Every seed is exhausted: stop loading instead of firing up to 12
+          // fresh searches on each subsequent scroll tick.
+          exhausted = true;
+          break;
         }
       }
     } catch {
@@ -464,12 +473,16 @@ async function mountFeed(root, seeds) {
   };
 
   const maybeMore = () => {
-    if (busy || failed || !sentinel.isConnected) return;
-    if (sentinel.getBoundingClientRect().top < window.innerHeight + 900) load();
+    if (busy || failed || exhausted || !sentinel.isConnected) return;
+    // The IntersectionObserver above is the sole scroll trigger; reading
+    // getBoundingClientRect() on every scroll event forced a synchronous
+    // layout on the UI thread.
+    load();
   };
 
   retry?.addEventListener('click', () => {
     failed = false;
+    exhausted = false;
     paint();
     load();
   });
@@ -1055,8 +1068,9 @@ export async function mountResults(root, query, sort = 'relevance') {
     }
   });
 
+  let observer = null;
   if (sentinel) {
-    const observer = new IntersectionObserver(
+    observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting) && more.hidden) load(true);
       },
@@ -1066,10 +1080,9 @@ export async function mountResults(root, query, sort = 'relevance') {
   }
 
   const onScroll = () => maybeMore();
-  window.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', onScroll, { passive: true });
   root.__feedCleanup = () => {
-    window.removeEventListener('scroll', onScroll);
+    observer?.disconnect();
     window.removeEventListener('resize', onScroll);
   };
 
@@ -1266,7 +1279,7 @@ export function renderRemoteWatch(id, info = null) {
         <div class="watch-actions">
           <button class="action-btn" type="button" data-yt-rate title="Playback speed">${icon('gauge')} <span data-yt-rate-label>${rate}×</span></button>
           <button class="action-btn" type="button" data-yt-quality title="Video quality">${icon('hd')} <span data-yt-quality-label>${esc(quality)}</span></button>
-          <button class="action-btn ${captions ? 'active' : ''}" type="button" data-yt-cc aria-pressed="${captions}" title="Subtitles">${icon('cc')} <span data-yt-cc-label>${captions ? 'CC On' : 'CC Off'}</span></button>
+          ${APP_MODE ? '' : `<button class="action-btn ${captions ? 'active' : ''}" type="button" data-yt-cc aria-pressed="${captions}" title="Subtitles">${icon('cc')} <span data-yt-cc-label>${captions ? 'CC On' : 'CC Off'}</span></button>`}
           <button class="action-btn" type="button" data-yt-sleep title="Sleep timer">${icon('clock')} <span data-yt-sleep-label>${(store.state.sleepTimer || 0) ? (store.state.sleepTimer + 'm') : 'Off'}</span></button>
           <button class="action-btn ${liked ? 'liked' : ''}" type="button" data-yt-like aria-pressed="${liked}">${icon('thumb-up')} <span data-yt-like-label>${liked ? 'Liked' : 'Like'}</span></button>
           <button class="action-btn ${savedYt ? 'active' : ''}" type="button" data-yt-save aria-pressed="${savedYt}">${icon(savedYt ? 'check' : 'save')} <span data-yt-save-label>${savedYt ? 'Saved' : 'Watch later'}</span></button>
@@ -1355,6 +1368,7 @@ export function mountRemoteWatch(root, id) {
   const sleepLabelEl = root.querySelector('[data-yt-sleep-label]');
   const SLEEP_OPTIONS = [0, 15, 30, 45, 60];
   let sleepTimerHandle = null;
+  let sleepPauseHandle = null;
   const refreshSleepLabel = () => {
     const m = Number(store.state.sleepTimer) || 0;
     if (sleepLabelEl) sleepLabelEl.textContent = m ? `${m}m` : 'Off';
@@ -1364,23 +1378,31 @@ export function mountRemoteWatch(root, id) {
       clearInterval(sleepTimerHandle);
       sleepTimerHandle = null;
     }
+    if (sleepPauseHandle) {
+      clearTimeout(sleepPauseHandle);
+      sleepPauseHandle = null;
+    }
   };
   const armSleepTimer = (minutes) => {
     clearSleepTimer();
     store.set('sleepTimer', minutes);
     refreshSleepLabel();
     if (minutes > 0) {
-      let remainMin = minutes;
+      // Wall-clock deadline: background WebView throttles 1s intervals, but a
+      // single timeout still fires at the right time and must do the pausing.
+      const deadline = Date.now() + minutes * 60 * 1000;
+      const fire = () => {
+        clearSleepTimer();
+        store.set('sleepTimer', 0);
+        refreshSleepLabel();
+        try { mediaTarget?.pause?.(); } catch {}
+        toast(`Sleep timer: paused after ${minutes} min`);
+      };
+      sleepPauseHandle = setTimeout(fire, minutes * 60 * 1000);
       sleepTimerHandle = setInterval(() => {
-        remainMin -= 1 / 60;
-        if (sleepLabelEl) sleepLabelEl.textContent = `${Math.ceil(remainMin)}m`;
-        if (remainMin <= 0) {
-          clearSleepTimer();
-          store.set('sleepTimer', 0);
-          refreshSleepLabel();
-          try { mediaTarget?.pause?.(); } catch {}
-          toast(`Sleep timer: paused after ${minutes} min`);
-        }
+        const remain = Math.max(0, Math.ceil((deadline - Date.now()) / 60000));
+        if (sleepLabelEl) sleepLabelEl.textContent = `${remain}m`;
+        if (remain <= 0) fire();
       }, 1000);
       toast(`Sleep timer set for ${minutes} min`);
     } else {
@@ -1407,7 +1429,6 @@ export function mountRemoteWatch(root, id) {
   let listenTries = 0;
   let destroyed = false;
   let relatedVideos = [];
-  const played = [];
   let endTimer = null;
   let endVisible = false;
   let endSuppressed = false;
@@ -1423,7 +1444,7 @@ export function mountRemoteWatch(root, id) {
   let lastPlayerState = null;
 
   const endCard = playerEl?.querySelector('[data-yt-end]');
-  played.push(id);
+  store.pushWatchTrail(id);
 
   /* Show that autoplay is locked to one account, with an easy way out. */
   const activeAccount = store.accountFilter();
@@ -1519,6 +1540,10 @@ export function mountRemoteWatch(root, id) {
     const visible = !!event.detail?.visible;
     if (visible) {
       lastNudge = 0;
+      if (keepAliveTimer) {
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+      }
       return;
     }
     if (pausedByUser || lastPlayerState === 0 || !frame) return;
@@ -1530,6 +1555,7 @@ export function mountRemoteWatch(root, id) {
     wantPlaying = true;
     lastAdvance = Date.now();
     lastNudge = 0;
+    if (!keepAliveTimer) keepAliveTimer = setInterval(nudgePlayback, 2000);
     send({ event: 'command', func: 'playVideo', args: [] });
   };
 
@@ -1663,21 +1689,40 @@ export function mountRemoteWatch(root, id) {
   const playNext = (video = nextUp()) => {
     if (!video?.id || destroyed) return;
     hideEndCard();
-    if (!played.length || played[played.length - 1] !== id) played.push(id);
+    store.pushWatchTrail(id);
     store.removeFromQueue(video.id);
-    // Repeat all: rotate the finished video back to the end of the queue so
+    // Repeat all: rotate the FINISHED video back to the end of the queue so
     // the list cycles instead of ending after one pass (NewPipe/LibreTube).
-    if (store.repeatMode() === 'all') store.addToQueue(video);
+    if (store.repeatMode() === 'all') {
+      store.addToQueue({
+        id,
+        title: meta.title,
+        channel: meta.channel,
+        thumb: meta.thumb,
+        length: meta.length || '',
+      });
+    }
     save(true);
     navigate(`/watch/yt/${encodeURIComponent(video.id)}?autoplay=1${accountSuffix()}`);
   };
 
   const playPrevious = () => {
-    if (!played.length || destroyed) {
+    if (destroyed) return;
+    // The current page pushed its own id on mount; skip it to find the real
+    // predecessor. The trail lives in the store so it survives re-mounts.
+    let prevId = null;
+    for (let i = 0; i < 4; i++) {
+      const candidate = store.popWatchTrail();
+      if (!candidate) break;
+      if (candidate !== id) {
+        prevId = candidate;
+        break;
+      }
+    }
+    if (!prevId) {
       toast('Nothing to go back to.');
       return;
     }
-    const prevId = played.pop();
     hideEndCard();
     save(true);
     const suffix = store.accountFilter() ? `&acct=${encodeURIComponent(store.accountFilter().id)}` : '';
@@ -1918,7 +1963,9 @@ export function mountRemoteWatch(root, id) {
     clearTimeout(seekTimer);
     clearInterval(endTimer);
     clearSleepTimer();
+    if (store.state.sleepTimer) store.set('sleepTimer', 0);
     clearInterval(keepAliveTimer);
+    root.removeEventListener('click', onWatchClick);
     clearMediaTarget(mediaTarget);
     send({ event: 'command', func: 'pauseVideo', args: [] });
     frame = null;
@@ -1945,7 +1992,7 @@ export function mountRemoteWatch(root, id) {
   document.addEventListener('visibilitychange', onHide);
   window.addEventListener('pagehide', onPageHide);
   window.addEventListener('dinosour:appvisibility', onAppVisibility);
-  keepAliveTimer = setInterval(nudgePlayback, 2000);
+  if (!isAppVisible()) keepAliveTimer = setInterval(nudgePlayback, 2000);
 
   const startEmbed = () => {
     if (!playerEl) return;
@@ -2026,7 +2073,7 @@ export function mountRemoteWatch(root, id) {
   store.resetNextCursor();
   paintQueue();
 
-  root.addEventListener('click', (event) => {
+  const onWatchClick = (event) => {
     const add = event.target.closest('[data-add-queue]');
     if (add) {
       const added = store.addToQueue({
@@ -2054,7 +2101,8 @@ export function mountRemoteWatch(root, id) {
       paintQueue();
       toast('Up Next cleared');
     }
-  });
+  };
+  root.addEventListener('click', onWatchClick);
 
   root.querySelector('[data-yt-autoplay]')?.addEventListener('click', (event) => {
     const button = event.currentTarget;
@@ -2211,18 +2259,10 @@ export function mountRemoteWatch(root, id) {
     if (frame) {
       frame.src =
         `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1&cc_load_policy=${next ? 1 : 3}` +
-        (saved && saved.t >= 4 && (!saved.d || saved.t < saved.d - 6) ? `&start=${Math.floor(saved.t)}` : '') +
+        (position >= 4 && (!duration || position < duration - 6) ? `&start=${Math.floor(position)}` : '') +
         (APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`);
     }
     toast(next ? 'Subtitles on' : 'Subtitles off');
-  });
-
-  /* Double-tap on the player seeks ±10s (YouTube embed command). */
-  playerEl?.addEventListener('dblclick', (event) => {
-    event.preventDefault();
-    const delta = position > 3 ? -10 : 10;
-    const target = Math.max(0, position + delta);
-    seekTo(target, false);
   });
 
   // Reached from an end screen: start this video without a second tap.

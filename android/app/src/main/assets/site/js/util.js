@@ -8,9 +8,17 @@ export const icon = (name, cls = '') =>
 
 const compactFmt = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 
+const compactCache = new Map();
 export function compact(n) {
   if (n == null) return '0';
-  return compactFmt.format(n).replace('.0', '');
+  const key = String(n);
+  let out = compactCache.get(key);
+  if (out === undefined) {
+    out = compactFmt.format(n).replace('.0', '');
+    if (compactCache.size > 500) compactCache.clear();
+    compactCache.set(key, out);
+  }
+  return out;
 }
 
 export function exact(n) {
@@ -30,52 +38,63 @@ export function fmtTime(total) {
   return fmtDuration(total);
 }
 
+const TIME_UNITS = [
+  [31536000, 'year'],
+  [2592000, 'month'],
+  [604800, 'week'],
+  [86400, 'day'],
+  [3600, 'hour'],
+  [60, 'minute'],
+];
+
 export function timeAgo(iso) {
   if (!iso) return '';
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return '';
   const diff = Math.max(0, (Date.now() - then) / 1000);
   if (diff < 45) return 'just now';
-  const units = [
-    [31536000, 'year'],
-    [2592000, 'month'],
-    [604800, 'week'],
-    [86400, 'day'],
-    [3600, 'hour'],
-    [60, 'minute'],
-  ];
-  for (const [secs, name] of units) {
+  for (const [secs, name] of TIME_UNITS) {
     const n = Math.floor(diff / secs);
     if (n >= 1) return `${n} ${name}${n > 1 ? 's' : ''} ago`;
   }
   return 'just now';
 }
 
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export function esc(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ESCAPES[c]);
 }
 
 export function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+const shadeCache = new Map();
 export function shade(hex, percent) {
+  const key = `${hex}|${percent}`;
+  const cached = shadeCache.get(key);
+  if (cached !== undefined) return cached;
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
   if (!m) return hex;
   const [r, g, b] = m.slice(1).map((x) => {
     const v = parseInt(x, 16) + Math.round((percent / 100) * 255);
     return clamp(v, 0, 255);
   });
-  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  const out = `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  if (shadeCache.size > 200) shadeCache.clear();
+  shadeCache.set(key, out);
+  return out;
 }
 
+const avatarCache = new Map();
 export function avatarStyle(color) {
-  return `background: linear-gradient(140deg, ${color}, ${shade(color, -28)});`;
+  let out = avatarCache.get(color);
+  if (out === undefined) {
+    out = `background: linear-gradient(140deg, ${color}, ${shade(color, -28)});`;
+    if (avatarCache.size > 200) avatarCache.clear();
+    avatarCache.set(color, out);
+  }
+  return out;
 }
 
 export function initials(name) {

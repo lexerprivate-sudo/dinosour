@@ -15,7 +15,10 @@ function loadHls() {
     script.src = '/js/vendor/hls.min.js';
     script.async = true;
     script.onload = () => resolve(globalThis.Hls);
-    script.onerror = () => reject(new Error('hls.js failed to load'));
+    script.onerror = () => {
+      loader = null; // allow a later play attempt to retry
+      reject(new Error('hls.js failed to load'));
+    };
     document.head.append(script);
   });
   return loader;
@@ -40,6 +43,7 @@ export async function attachStream(video, src, { onFatal } = {}) {
       video.src = src;
       return null;
     }
+    if (!video.isConnected) return null;
 
     const hls = new Hls({
       enableWorker: true,
