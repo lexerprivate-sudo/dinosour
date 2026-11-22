@@ -2588,3 +2588,47 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
   .account-head .avatar { width: 64px; height: 64px; font-size: 24px; }
   .account-mode-banner { margin: 10px 12px 0; }
 }
+
+/* ---------- touch feedback & micro-interactions (SWARM1000) ---------- */
+:root { --ease: cubic-bezier(.2,.8,.2,1); }
+.btn-light, .btn-ghost, .btn-primary, .pc-menu button {
+  transition: background .14s var(--ease), opacity .14s var(--ease), transform .1s var(--ease);
+}
+.btn-light:active, .btn-ghost:active, .btn-primary:active,
+.action-btn:active, .chip:active, .library-tab:active,
+.mobile-nav-item:active, .card-menu:active, .mini-btn:active,
+.queue-remove:active, .repeat-toggle:active, .autoplay-toggle:active {
+  transform: scale(.96);
+}
+.card:active .thumb, .result:active .thumb { opacity: .82; }
+.result { transition: background .14s var(--ease); }
+.suggestion { transition: background .12s var(--ease); }
+
+/* Playful logo micro-interaction. */
+.brand-mark { transition: transform .2s var(--ease), box-shadow .2s var(--ease); }
+.brand:hover .brand-mark { transform: scale(1.06) rotate(-3deg); box-shadow: 0 3px 10px rgba(0,0,0,.28); }
+
+/* Satisfying like / save / repeat state pops. */
+@keyframes statePop { 0% { transform: scale(1); } 45% { transform: scale(1.32); } 100% { transform: scale(1); } }
+.action-btn.liked .icon, .action-btn.disliked .icon,
+.action-btn.active .icon, .repeat-toggle.active .icon { animation: statePop .28s var(--ease); }
+
+/* Dialog + sheet entrances (were snapping in). */
+@keyframes dialogIn { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes scrimIn { from { opacity: 0; } to { opacity: 1; } }
+.dialog-scrim { animation: scrimIn .16s ease both; }
+.dialog { animation: dialogIn .22s var(--ease) both; }
+@media (max-width: 700px) {
+  .dialog { animation: sheetUp .24s var(--ease) both; }
+}
+
+/* Double-tap seek feedback bubble. */
+@keyframes seekBubble { 0% { opacity: 0; transform: scale(.7); } 25% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.18); } }
+.seek-feedback {
+  position: absolute; top: 50%; z-index: 8; pointer-events: none;
+  padding: 10px 14px; border-radius: 999px; background: rgba(0,0,0,.72); color: #fff;
+  font-size: 13px; font-weight: 700; transform: translateY(-50%);
+  animation: seekBubble .55s var(--ease) both;
+}
+.seek-feedback.left { left: 12%; }
+.seek-feedback.right { right: 12%; }

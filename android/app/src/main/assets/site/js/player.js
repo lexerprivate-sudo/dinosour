@@ -306,6 +306,12 @@ export class Player {
     if (!d) return;
     this.media.currentTime = clamp(this.media.currentTime + seconds, 0, d - 0.1);
     this.reveal();
+    // Brief animated confirmation for keyboard / double-tap seeks.
+    const bubble = document.createElement('span');
+    bubble.className = 'seek-feedback ' + (seconds < 0 ? 'left' : 'right');
+    bubble.textContent = seconds < 0 ? '« 10 seconds' : '10 seconds »';
+    this.media.parentElement?.appendChild(bubble);
+    setTimeout(() => bubble.remove(), 600);
   }
 
   ratioFromEvent(e) {

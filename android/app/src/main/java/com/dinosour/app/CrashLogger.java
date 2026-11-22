@@ -99,13 +99,13 @@ public final class CrashLogger {
   public static void recordEvent(Context context, String event) {
     String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
     String text = "=== dinosour diagnostic: " + event + " (" + time + ") ===\n";
-    Log.e(TAG, text.trim());
+    Log.d(TAG, text.trim());
     try {
       File dir = context.getFilesDir();
       if (dir != null && dir.exists()) {
-        try (FileWriter last = new FileWriter(new File(dir, LAST), true)) {
-          last.write(text);
-        }
+        // Diagnostics belong in HISTORY only. "LAST" must stay the genuine
+        // crash report so Settings shows the right thing and the file cannot
+        // grow without bound.
         try (FileWriter history = new FileWriter(new File(dir, HISTORY), true)) {
           history.write(text);
         }

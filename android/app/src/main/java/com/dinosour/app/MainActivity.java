@@ -842,11 +842,14 @@ public class MainActivity extends Activity {
   }
 
   private void stopMediaService() {
-    if (!PlaybackService.RUNNING) return;
+    // Always dispatch an idempotent stop: RUNNING is a lifecycle flag that can
+    // be false while the service is still starting, which previously dropped
+    // the stop and left audio + notification alive. stopService() needs no
+    // running-service precondition and works from the background on API 26+.
     Intent intent = new Intent(this, PlaybackService.class);
     intent.setAction(PlaybackService.ACTION_STOP);
     try {
-      startService(intent);
+      stopService(intent);
     } catch (Exception ignored) {
       // Nothing to stop.
     }
