@@ -996,7 +996,10 @@ public class MainActivity extends Activity {
     } else if (!checkedThisLaunch) {
       // Always look once when the app is opened, then throttle background resumes.
       checkedThisLaunch = true;
-      checkForUpdate(true, false);
+      // REA finding: forcing a GitHub API call on every launch can hit the
+      // unauthenticated 60/hour rate limit. The normal 15-minute throttle is
+      // plenty for a release that ships once every few days.
+      checkForUpdate(false, false);
     } else {
       checkForUpdate();
     }

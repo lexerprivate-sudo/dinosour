@@ -2503,6 +2503,19 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
 .account-avatar .avatar { display: grid; place-items: center; }
 .account-avatar:hover .avatar { outline: 2px solid var(--blue); outline-offset: 2px; }
 
+.repeat-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.repeat-toggle:hover { background: var(--surface-2); color: var(--text); }
+.repeat-toggle .icon { width: 14px; height: 14px; }
+
 .watch-channel-row { margin: 14px 0 6px; }
 .watch-channel-link {
   display: inline-flex;

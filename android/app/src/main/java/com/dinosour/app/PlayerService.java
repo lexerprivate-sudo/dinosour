@@ -1,6 +1,8 @@
 package com.dinosour.app;
 
 import android.content.Intent;
+import androidx.media3.common.AudioAttributes;
+import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.MediaMetadata;
@@ -27,7 +29,21 @@ public class PlayerService extends MediaSessionService {
     public void onCreate() {
         super.onCreate();
         try {
-            ExoPlayer player = new ExoPlayer.Builder(this).build();
+            // REA finding (NewPipe): ExoPlayer handles audio focus and wake
+            // locks itself when configured; the app should not hand-roll them.
+            // Mirrors NewPipe's initPlayback (REA): ExoPlayer owns audio focus and
+            // wake locks; platform diagnostics disabled; media tunneling on.
+            ExoPlayer player = new ExoPlayer.Builder(this)
+                    .setAudioAttributes(AudioAttributes.DEFAULT, true)
+                    .setHandleAudioBecomingNoisy(true)
+                    .setWakeMode(C.WAKE_MODE_NETWORK)
+                    .setUsePlatformDiagnostics(false)
+                    .build();
+            if (player.getTrackSelector() instanceof androidx.media3.exoplayer.trackselection.DefaultTrackSelector) {
+                androidx.media3.exoplayer.trackselection.DefaultTrackSelector ts =
+                        (androidx.media3.exoplayer.trackselection.DefaultTrackSelector) player.getTrackSelector();
+                ts.setParameters(ts.buildUponParameters().setTunnelingEnabled(true));
+            }
             session = new MediaSession.Builder(this, player).build();
         } catch (Throwable error) {
             // An incomplete media stack must never crash the whole app process.
@@ -86,6 +102,20 @@ public class PlayerService extends MediaSessionService {
             }
         }).start();
         return START_STICKY;
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        try {
+            // ViMusic/OnClearFromRecentService pattern: if nothing is playing,
+            // swiping the app away stops the foreground service instead of
+            // leaving an orphan notification.
+            if (session == null || !session.getPlayer().getPlayWhenReady()) {
+                stopSelf();
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override

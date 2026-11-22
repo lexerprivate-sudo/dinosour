@@ -929,6 +929,13 @@ export function renderResults(query) {
 }
 
 export async function mountResults(root, query) {
+  // Remember the search that led here so Up Next on an opened video can use
+  // the topic instead of the channel when the video title is unavailable.
+  try {
+    sessionStorage.setItem('dinosour.lastQuery', String(query || ''));
+  } catch {
+    /* storage may be unavailable */
+  }
   const list = root.querySelector('[data-yt-list]');
   const more = root.querySelector('[data-yt-more]');
   const status = root.querySelector('[data-yt-status]');
@@ -1198,6 +1205,7 @@ export function renderRemoteWatch(id, info = null) {
           </div>
           <div class="end-actions">
             <span class="end-count" data-end-count></span>
+            <button class="btn-ghost" type="button" data-end-act="prev">Previous</button>
             <button class="btn-ghost" type="button" data-end-act="cancel">Cancel</button>
             <button class="btn-light" type="button" data-end-act="play">Play now</button>
             <button class="btn-light" type="button" data-end-act="replay" hidden>Replay</button>
@@ -1236,6 +1244,8 @@ export function renderRemoteWatch(id, info = null) {
           <button class="autoplay-toggle" type="button" data-yt-autoplay aria-pressed="${autoplay}">
             <span class="switch ${autoplay ? 'on' : ''}"></span>Autoplay
           </button>
+          <button class="repeat-toggle" type="button" data-yt-repeat title="Repeat mode">${icon('refresh')} <span data-yt-repeat-label>${{ off: 'Off', one: 'One', all: 'All' }[store.repeatMode()]}</span></button>
+          <button class="repeat-toggle" type="button" data-yt-shuffle title="Shuffle the queue" aria-pressed="${store.isShuffle()}">${icon('dots-h')} <span data-yt-shuffle-label>${store.isShuffle() ? 'On' : 'Off'}</span></button>
         </div>
         <div class="up-next-list" data-queue-list>${queue.map(queueItemHtml).join('')}</div>
         <p class="up-next-empty" data-queue-empty ${queue.length ? 'hidden' : ''}>Tap ${icon('plus')} on any video to line it up here.</p>
@@ -1345,6 +1355,7 @@ export function mountRemoteWatch(root, id) {
   let listenTries = 0;
   let destroyed = false;
   let relatedVideos = [];
+  const played = [];
   let endTimer = null;
   let endVisible = false;
   let endSuppressed = false;
@@ -1360,6 +1371,7 @@ export function mountRemoteWatch(root, id) {
   let lastPlayerState = null;
 
   const endCard = playerEl?.querySelector('[data-yt-end]');
+  played.push(id);
 
   /* Show that autoplay is locked to one account, with an easy way out. */
   const activeAccount = store.accountFilter();
@@ -1568,9 +1580,18 @@ export function mountRemoteWatch(root, id) {
     if (filter) {
       // Only queued videos from this account advance automatically; the
       // related rail is still shown in full for the video the user clicked.
-      return queue.find(accountMatches) || null;
+      const pool = store.isShuffle()
+        ? store.queueList().filter(accountMatches).sort(() => Math.random() - 0.5)
+        : store.queueList().filter(accountMatches);
+      return pool[0] || null;
     }
-    return queue[0] || relatedVideos[0] || null;
+    if (store.isShuffle()) {
+      const pool = store.queueList();
+      if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
+      if (relatedVideos.length) return relatedVideos[Math.floor(Math.random() * relatedVideos.length)] || null;
+      return null;
+    }
+    return store.queueList()[0] || relatedVideos[0] || null;
   };
 
   const hideEndCard = () => {
@@ -1590,9 +1611,25 @@ export function mountRemoteWatch(root, id) {
   const playNext = (video = nextUp()) => {
     if (!video?.id || destroyed) return;
     hideEndCard();
+    if (!played.length || played[played.length - 1] !== id) played.push(id);
     store.removeFromQueue(video.id);
+    // Repeat all: rotate the finished video back to the end of the queue so
+    // the list cycles instead of ending after one pass (NewPipe/LibreTube).
+    if (store.repeatMode() === 'all') store.addToQueue(video);
     save(true);
     navigate(`/watch/yt/${encodeURIComponent(video.id)}?autoplay=1${accountSuffix()}`);
+  };
+
+  const playPrevious = () => {
+    if (!played.length || destroyed) {
+      toast('Nothing to go back to.');
+      return;
+    }
+    const prevId = played.pop();
+    hideEndCard();
+    save(true);
+    const suffix = store.accountFilter() ? `&acct=${encodeURIComponent(store.accountFilter().id)}` : '';
+    navigate(`/watch/yt/${encodeURIComponent(prevId)}?autoplay=1${suffix}`);
   };
 
   const replay = () => {
@@ -1619,7 +1656,41 @@ export function mountRemoteWatch(root, id) {
     const bar = endCard.querySelector('[data-end-progress]');
     const play = endCard.querySelector('[data-end-act="play"]');
     const replayBtn = endCard.querySelector('[data-end-act="replay"]');
+    const prevBtn = endCard.querySelector('[data-end-act="prev"]');
     const next = nextUp();
+
+    // Repeat one: show this video as "up next" and replay when the countdown
+    // finishes, instead of moving to another video.
+    if (store.repeatMode() === 'one') {
+      label.textContent = 'Repeat one';
+      title.textContent = meta.title;
+      sub.textContent = meta.channel || 'YouTube';
+      thumb.src = meta.thumb;
+      thumb.alt = '';
+      links.forEach((a) => {
+        a.href = `/watch/yt/${encodeURIComponent(id)}?autoplay=1${accountSuffix()}`;
+      });
+      play.hidden = true;
+      replayBtn.hidden = false;
+      if (store.state.autoplay) {
+        const total = 8000;
+        const started = Date.now();
+        clearInterval(endTimer);
+        endTimer = setInterval(() => {
+          const left = total - (Date.now() - started);
+          count.textContent = `Replay in ${Math.max(0, Math.ceil(left / 1000))}`;
+          bar.style.width = `${Math.min(100, Math.max(0, 100 - (left / total) * 100))}%`;
+          if (left <= 0) {
+            clearInterval(endTimer);
+            replay();
+          }
+        }, 200);
+      } else {
+        count.textContent = 'Autoplay is off';
+        bar.style.width = '0%';
+      }
+      return;
+    }
 
     // "Also next": whatever is queued, then the related rail, without repeats.
     const also = [...store.queueList(), ...relatedVideos]
@@ -1942,9 +2013,24 @@ export function mountRemoteWatch(root, id) {
     toast(on ? 'Autoplay on' : 'Autoplay off');
   });
 
+  root.querySelector('[data-yt-repeat]')?.addEventListener('click', () => {
+    const mode = store.cycleRepeat();
+    const label = root.querySelector('[data-yt-repeat-label]');
+    if (label) label.textContent = { off: 'Off', one: 'One', all: 'All' }[mode];
+    toast({ off: 'Repeat off', one: 'Repeat this video', all: 'Repeat the queue' }[mode]);
+  });
+
+  root.querySelector('[data-yt-shuffle]')?.addEventListener('click', () => {
+    const on = store.toggleShuffle();
+    const label = root.querySelector('[data-yt-shuffle-label]');
+    if (label) label.textContent = on ? 'On' : 'Off';
+    toast(on ? 'Shuffle on' : 'Shuffle off');
+  });
+
   endCard?.addEventListener('click', (event) => {
     const act = event.target.closest('[data-end-act]')?.dataset.endAct;
-    if (act === 'play') playNext();
+    if (act === 'prev') playPrevious();
+    else if (act === 'play') playNext();
     else if (act === 'replay') replay();
     else if (act === 'cancel') {
       endSuppressed = true;
@@ -2109,9 +2195,15 @@ export function mountRemoteWatch(root, id) {
     // Topic of the video the user clicked first; the channel is only a
     // fallback. This makes Up Next similar to what was watched/searched.
     const titleSeed = String(meta.title || '').replace(/\s*\|.*$/, '').trim();
+    let searchedTopic = '';
+    try {
+      searchedTopic = sessionStorage.getItem('dinosour.lastQuery') || '';
+    } catch {
+      /* storage may be unavailable */
+    }
     const seed = titleSeed && titleSeed !== 'YouTube video'
       ? titleSeed
-      : (channel || root.dataset.query || '');
+      : (searchedTopic || root.dataset.query || '');
     if (!seed) {
       relatedEl.innerHTML = '<p class="related-empty">No related videos found.</p>';
       return;

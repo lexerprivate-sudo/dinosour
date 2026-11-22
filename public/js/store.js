@@ -27,6 +27,8 @@ const defaults = {
   ytRate: 1,
   ytQuality: 'auto',
   sleepTimer: 0,
+  repeatMode: 'off',
+  shuffle: false,
   trendingTopics: {},
   trendingCustom: [],
   trendingPrefs: {},
@@ -415,6 +417,26 @@ export const store = {
   clearQueue() {
     this.state.queue = [];
     this.save();
+  },
+
+  /** Repeat cycle follows NewPipe: Off -> One -> All -> Off. */
+  repeatMode() {
+    return ['off', 'one', 'all'].includes(this.state.repeatMode) ? this.state.repeatMode : 'off';
+  },
+
+  cycleRepeat() {
+    const order = ['off', 'one', 'all'];
+    const next = order[(order.indexOf(this.repeatMode()) + 1) % order.length];
+    this.state.repeatMode = next;
+    this.save();
+    return next;
+  },
+
+  isShuffle() { return !!this.state.shuffle; },
+  toggleShuffle() {
+    this.state.shuffle = !this.state.shuffle;
+    this.save();
+    return this.state.shuffle;
   },
 
   /* Account mode: when set, next videos are restricted to this channel. */
