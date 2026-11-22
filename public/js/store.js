@@ -29,6 +29,9 @@ const defaults = {
   sleepTimer: 0,
   repeatMode: 'off',
   shuffle: false,
+  captions: false,
+  hiddenKeywords: [],
+  hiddenChannels: [],
   trendingTopics: {},
   trendingCustom: [],
   trendingPrefs: {},
@@ -432,11 +435,72 @@ export const store = {
     return next;
   },
 
+  /* Content filters: hide videos by keyword or channel. */
+  hiddenKeywords() {
+    return Array.isArray(this.state.hiddenKeywords)
+      ? this.state.hiddenKeywords.filter((k) => typeof k === 'string' && k)
+      : [];
+  },
+
+  hiddenChannels() {
+    return Array.isArray(this.state.hiddenChannels)
+      ? this.state.hiddenChannels.filter((k) => typeof k === 'string' && k)
+      : [];
+  },
+
+  addHiddenKeyword(keyword) {
+    const value = String(keyword || '').trim().slice(0, 60);
+    if (!value) return null;
+    if (this.hiddenKeywords().some((k) => k.toLowerCase() === value.toLowerCase())) return null;
+    this.state.hiddenKeywords = [...this.hiddenKeywords(), value];
+    this.save();
+    return value;
+  },
+
+  removeHiddenKeyword(keyword) {
+    this.state.hiddenKeywords = this.hiddenKeywords().filter((k) => k !== keyword);
+    this.save();
+  },
+
+  addHiddenChannel(channel) {
+    const value = String(channel || '').trim().slice(0, 120);
+    if (!value) return null;
+    if (this.hiddenChannels().some((c) => c.toLowerCase() === value.toLowerCase())) return null;
+    this.state.hiddenChannels = [...this.hiddenChannels(), value];
+    this.save();
+    return value;
+  },
+
+  removeHiddenChannel(channel) {
+    this.state.hiddenChannels = this.hiddenChannels().filter((c) => c !== channel);
+    this.save();
+  },
+
+  /** True when a YouTube result should be filtered out. */
+  isFiltered(video) {
+    if (!video) return false;
+    const title = String(video.title || '').toLowerCase();
+    const channel = String(video.channel || '').toLowerCase();
+    if (this.hiddenChannels().some((c) => channel === c.toLowerCase())) return true;
+    return this.hiddenKeywords().some((k) => title.includes(k.toLowerCase()));
+  },
+
   isShuffle() { return !!this.state.shuffle; },
   toggleShuffle() {
     this.state.shuffle = !this.state.shuffle;
     this.save();
     return this.state.shuffle;
+  },
+
+  /* Subtitles/captions: off by default, toggled from the player controls. */
+  captionsEnabled() { return !!this.state.captions; },
+  setCaptions(on) {
+    this.state.captions = !!on;
+    this.save();
+    return this.state.captions;
+  },
+  toggleCaptions() {
+    return this.setCaptions(!this.state.captions);
   },
 
   /* Account mode: when set, next videos are restricted to this channel. */

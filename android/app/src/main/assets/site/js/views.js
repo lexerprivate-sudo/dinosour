@@ -48,8 +48,8 @@ export function renderChips(active = 'All') {
 export function renderHome({ topic = 'All' } = {}) {
   const isTopic = topic && topic !== 'All';
   const showLocal = !APP_MODE && !isTopic;
-  const list = showLocal ? longVideos() : [];
-  const shorts = showLocal ? shortVideos() : [];
+  const list = showLocal ? longVideos().filter((v) => !store.isFiltered(v)) : [];
+  const shorts = showLocal ? shortVideos().filter((v) => !store.isFiltered(v)) : [];
 
   if (showLocal && !list.length) {
     return `${renderChips(topic)}${emptyState({
@@ -228,13 +228,14 @@ export async function mountTrending(root, { period, category, sort } = {}) {
     );
     const limit = state.limits.get(name) || pageLimit();
     const chosen = ranked.slice(0, limit);
+    const visible = chosen.filter((v) => !store.isFiltered(v));
     const note = !cached.inPeriod.length && cached.unique.length
       ? '<p class="trend-note">No uploads found in this period — showing the most popular available.</p>'
       : '';
-    grid.innerHTML = chosen.length
-      ? `${note}<div class="grid">${chosen.map(ytCardHtml).join('')}</div>`
+    grid.innerHTML = visible.length
+      ? `${note}<div class="grid">${visible.map(ytCardHtml).join('')}</div>`
       : trendEmpty(name, true);
-    if (more) more.hidden = chosen.length >= ranked.length;
+    if (more) more.hidden = visible.length >= ranked.length;
   };
 
   const refreshChips = (section) => {
@@ -441,7 +442,9 @@ async function mountFeed(root, seeds) {
         if (!alive()) return;
 
         tokens.set(seed, data.continuation || null);
-        const fresh = (data.videos || []).filter((v) => v && v.id && !seen.has(v.id));
+        const fresh = (data.videos || [])
+          .filter((v) => v && v.id && !seen.has(v.id))
+          .filter((v) => !store.isFiltered(v));
         for (const v of fresh) seen.add(v.id);
         if (fresh.length) {
           grid.insertAdjacentHTML('beforeend', fresh.map(ytCardHtml).join(''));
@@ -872,8 +875,15 @@ function skeletons(count = 5) {
     .join('');
 }
 
-export function renderResults(query) {
+const RESULT_SORTS = [
+  ['relevance', 'Relevance'],
+  ['views', 'Most viewed'],
+  ['newest', 'Newest'],
+];
+
+export function renderResults({ query = '', sort = 'relevance' } = {}) {
   const q = (query || '').trim();
+  const order = RESULT_SORTS.some(([k]) => k === sort) ? sort : 'relevance';
   if (!q) {
     return `<div class="results">${emptyState({
       iconName: 'search',
@@ -912,6 +922,12 @@ export function renderResults(query) {
       <h1>Results for <span>“${esc(q)}”</span></h1>
       <p class="results-sub" data-results-sub>${local.length ? `${local.length} from this site` : ''}</p>
     </div>
+    <div class="result-tools">
+      ${RESULT_SORTS.map(
+        ([key, label]) =>
+          `<button type="button" class="result-sort ${key === order ? 'active' : ''}" data-result-sort="${key}" aria-pressed="${key === order}">${label}</button>`
+      ).join('')}
+    </div>
 
     ${localBlock}
 
@@ -928,7 +944,7 @@ export function renderResults(query) {
   </div>`;
 }
 
-export async function mountResults(root, query) {
+export async function mountResults(root, query, sort = 'relevance') {
   // Remember the search that led here so Up Next on an opened video can use
   // the topic instead of the channel when the video title is unavailable.
   try {
@@ -946,14 +962,32 @@ export async function mountResults(root, query) {
 
   const localCount = APP_MODE ? 0 : searchVideos(query).length;
   let continuation = null;
-  let loaded = 0;
   let busy = false;
+  let order = RESULT_SORTS.some(([k]) => k === sort) ? sort : 'relevance';
+  const all = [];
   const alive = () => list.isConnected;
+
+  const applyView = () => {
+    const shown = all
+      .filter((v) => !store.isFiltered(v))
+      .sort((a, b) =>
+        order === 'views'
+          ? parseViews(b.viewsText) - parseViews(a.viewsText)
+          : order === 'newest'
+            ? (publishedAgeDays(a.publishedText) ?? 1e9) - (publishedAgeDays(b.publishedText) ?? 1e9)
+            : 0
+      );
+    list.innerHTML = shown.length
+      ? shown.map(ytResultItemHtml).join('')
+      : '<p class="related-empty">No results left after filters.</p>';
+    return shown.length;
+  };
 
   const paintCount = () => {
     const parts = [];
     if (localCount) parts.push(`${localCount} from this site`);
-    if (loaded) parts.push(`${loaded} from YouTube`);
+    const shown = all.filter((v) => !store.isFiltered(v)).length;
+    if (shown) parts.push(`${shown} from YouTube`);
     sub.textContent = parts.join(' · ');
   };
 
@@ -978,19 +1012,15 @@ export async function mountResults(root, query) {
       if (!alive()) return;
 
       const videos = Array.isArray(data.videos) ? data.videos : [];
-      loaded += videos.length;
-      const html = videos.map(ytResultItemHtml).join('');
-
-      if (nextPage) list.insertAdjacentHTML('beforeend', html);
-      else list.innerHTML = html;
-
+      all.push(...videos);
       continuation = data.continuation || null;
+      const shown = applyView();
       more.hidden = true;
       more.textContent = 'Show more results';
       delete more.dataset.retry;
       paintCount();
 
-      if (!loaded) {
+      if (!shown) {
         setStatus(`No results for “${query}”.`);
       }
     } catch {
@@ -1043,6 +1073,19 @@ export async function mountResults(root, query) {
     window.removeEventListener('resize', onScroll);
   };
 
+  root.querySelectorAll('[data-result-sort]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      order = btn.dataset.resultSort;
+      root.querySelectorAll('[data-result-sort]').forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
+      applyView();
+      paintCount();
+    });
+  });
+
   await load(false);
 }
 
@@ -1059,6 +1102,7 @@ function ytCardHtml(v, extra = '', linkSuffix = '') {
   </a>
   <div class="card-details">
     <a class="account-avatar" href="${accountHref}" data-link title="See all ${esc(channel)} videos">${avatar({ name: channel, color: colorFor(channel) })}</a>
+    <button type="button" class="yt-card-hide" data-yt-hide-channel="${esc(channel)}" title="Hide ${esc(channel)} videos">${icon('x')}</button>
     <div class="card-text">
       <a href="/watch/yt/${encodeURIComponent(v.id)}${linkSuffix}" data-link><h3 class="card-title">${esc(v.title)}</h3></a>
       <div class="card-channel"><a class="name account-link" href="/channel/${encodeURIComponent(v.channelId || channel)}?yt=1&name=${encodeURIComponent(channel)}" data-link title="Only ${esc(channel)} videos">${esc(channel)}</a></div>
@@ -1167,6 +1211,7 @@ export function renderRemoteWatch(id, info = null) {
   const pct = saved ? Math.min(100, Math.max(1, (saved.t / saved.d) * 100)) : 0;
   const rate = YT_RATES.includes(Number(store.state.ytRate)) ? Number(store.state.ytRate) : 1;
   const quality = YT_QUALITIES.find(([value]) => value === store.state.ytQuality)?.[1] || 'Auto';
+  const captions = !!store.captionsEnabled();
 
   const queue = store.queueList();
   const autoplay = !!store.state.autoplay;
@@ -1221,6 +1266,7 @@ export function renderRemoteWatch(id, info = null) {
         <div class="watch-actions">
           <button class="action-btn" type="button" data-yt-rate title="Playback speed">${icon('gauge')} <span data-yt-rate-label>${rate}×</span></button>
           <button class="action-btn" type="button" data-yt-quality title="Video quality">${icon('hd')} <span data-yt-quality-label>${esc(quality)}</span></button>
+          <button class="action-btn ${captions ? 'active' : ''}" type="button" data-yt-cc aria-pressed="${captions}" title="Subtitles">${icon('cc')} <span data-yt-cc-label>${captions ? 'CC On' : 'CC Off'}</span></button>
           <button class="action-btn" type="button" data-yt-sleep title="Sleep timer">${icon('clock')} <span data-yt-sleep-label>${(store.state.sleepTimer || 0) ? (store.state.sleepTimer + 'm') : 'Off'}</span></button>
           <button class="action-btn ${liked ? 'liked' : ''}" type="button" data-yt-like aria-pressed="${liked}">${icon('thumb-up')} <span data-yt-like-label>${liked ? 'Liked' : 'Like'}</span></button>
           <button class="action-btn ${savedYt ? 'active' : ''}" type="button" data-yt-save aria-pressed="${savedYt}">${icon(savedYt ? 'check' : 'save')} <span data-yt-save-label>${savedYt ? 'Saved' : 'Watch later'}</span></button>
@@ -1315,7 +1361,7 @@ export function mountRemoteWatch(root, id) {
   };
   const clearSleepTimer = () => {
     if (sleepTimerHandle) {
-      clearTimeout(sleepTimerHandle);
+      clearInterval(sleepTimerHandle);
       sleepTimerHandle = null;
     }
   };
@@ -1324,12 +1370,18 @@ export function mountRemoteWatch(root, id) {
     store.set('sleepTimer', minutes);
     refreshSleepLabel();
     if (minutes > 0) {
-      sleepTimerHandle = setTimeout(() => {
-        try { mediaTarget?.pause?.(); } catch {}
-        toast(`Sleep timer: paused after ${minutes} min`);
-        store.set('sleepTimer', 0);
-        refreshSleepLabel();
-      }, minutes * 60 * 1000);
+      let remainMin = minutes;
+      sleepTimerHandle = setInterval(() => {
+        remainMin -= 1 / 60;
+        if (sleepLabelEl) sleepLabelEl.textContent = `${Math.ceil(remainMin)}m`;
+        if (remainMin <= 0) {
+          clearSleepTimer();
+          store.set('sleepTimer', 0);
+          refreshSleepLabel();
+          try { mediaTarget?.pause?.(); } catch {}
+          toast(`Sleep timer: paused after ${minutes} min`);
+        }
+      }, 1000);
       toast(`Sleep timer set for ${minutes} min`);
     } else {
       toast('Sleep timer off');
@@ -1901,7 +1953,7 @@ export function mountRemoteWatch(root, id) {
     frame.className = 'yt-frame';
     const startParam =
       saved && saved.t >= 4 && (!saved.d || saved.t < saved.d - 6) ? `&start=${Math.floor(saved.t)}` : '';
-    frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1${startParam}${APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`}`;
+    frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1&cc_load_policy=${store.captionsEnabled() ? 1 : 3}${startParam}${APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`}`;
     frame.title = root.querySelector('[data-yt-title]')?.textContent || 'YouTube video';
     frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
     frame.allowFullscreen = true;
@@ -2144,6 +2196,33 @@ export function mountRemoteWatch(root, id) {
         },
       })),
     ]);
+  });
+
+  const captionsBtn = root.querySelector('[data-yt-cc]');
+  const captionsLabel = root.querySelector('[data-yt-cc-label]');
+  captionsBtn?.addEventListener('click', () => {
+    const next = !store.captionsEnabled();
+    store.setCaptions(next);
+    captionsBtn?.classList.toggle('active', next);
+    captionsBtn?.setAttribute('aria-pressed', String(next));
+    if (captionsLabel) captionsLabel.textContent = next ? 'CC On' : 'CC Off';
+    // cc_load_policy 1 forces captions on, 3 forces them off; reload the
+    // embed so the new policy takes effect.
+    if (frame) {
+      frame.src =
+        `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1&cc_load_policy=${next ? 1 : 3}` +
+        (saved && saved.t >= 4 && (!saved.d || saved.t < saved.d - 6) ? `&start=${Math.floor(saved.t)}` : '') +
+        (APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`);
+    }
+    toast(next ? 'Subtitles on' : 'Subtitles off');
+  });
+
+  /* Double-tap on the player seeks ±10s (YouTube embed command). */
+  playerEl?.addEventListener('dblclick', (event) => {
+    event.preventDefault();
+    const delta = position > 3 ? -10 : 10;
+    const target = Math.max(0, position + delta);
+    seekTo(target, false);
   });
 
   // Reached from an end screen: start this video without a second tap.
@@ -2913,6 +2992,37 @@ export function settingsTopicsHtml() {
     .join('');
 }
 
+export function settingsFiltersHtml() {
+  const keywords = store.hiddenKeywords();
+  const channels = store.hiddenChannels();
+  const renderList = (items, removeAttr, label) => {
+    if (!items.length) return `<span class="settings-empty">No ${label} yet.</span>`;
+    return items
+      .map(
+        (v) =>
+          `<span class="topic-pill">${esc(v)}<button type="button" ${removeAttr}="${esc(v)}" aria-label="Remove ${esc(v)}">${icon('x')}</button></span>`
+      )
+    .join('');
+  };
+  return `<div class="settings-filters">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="flex:1;">
+        <div class="settings-card-head" style="margin-bottom:8px;"><h3 style="margin:0 0 4px;">Keywords</h3></div>
+        <div class="settings-topics">${renderList(keywords, 'data-remove-keyword', 'keywords')}</div>
+      </div>
+      <div style="flex:1;">
+        <div class="settings-card-head" style="margin-bottom:8px;"><h3 style="margin:0 4px;">Channels</h3></div>
+        <div class="settings-topics">${renderList(channels, 'data-remove-channel', 'channels')}</div>
+      </div>
+    </div>
+    <div class="settings-actions" style="display:flex;gap:10px;">
+      <button type="button" class="btn-outline" data-manage-keyword>${icon('plus')} Add keyword</button>
+      <button type="button" class="btn-outline" data-manage-channel>${icon('plus')} Add channel</button>
+    </div>
+    <p class="settings-status" data-filter-status role="status"></p>
+  </div>`;
+}
+
 export function renderSettings() {
   const app = APP_MODE;
   return `<div class="page settings-page">
@@ -3003,6 +3113,17 @@ export function renderSettings() {
       </div>
       <p class="settings-status" data-crash-status role="status"></p>
     </section>` : ''}
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2>Content filters</h2>
+          <p>Hide videos by keyword or channel. Hidden videos won’t appear in search, trending or your feed.</p>
+        </div>
+        <span class="settings-badge" data-filter-count>0 hidden</span>
+      </div>
+      <div class="settings-filters">${settingsFiltersHtml()}</div>
+    </section>
 
     <section class="settings-card">
       <div class="settings-card-head">

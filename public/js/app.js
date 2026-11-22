@@ -3,7 +3,7 @@
 import { channelById, loadCatalog, relatedFor, searchChannels, searchVideos, videoById } from './data.js';
 import { store } from './store.js';
 import { $, $$, APP_MODE, compact, debounce, esc, icon, prefersReducedMotion } from './util.js';
-import { closeMenu, navigate, openMenu, toast } from './ui.js';
+import { closeMenu, navigate, openMenu, openPrompt, toast } from './ui.js';
 import { attachStream, detachStream } from './stream.js';
 import { suggestYouTube } from './yt.js';
 import { closeMini, openMini } from './mini.js';
@@ -334,6 +334,15 @@ document.addEventListener('click', (e) => {
   if (addTopic) {
     e.preventDefault();
     openTopics();
+    return;
+  }
+
+  const hideChannel = e.target.closest('[data-yt-hide-channel]');
+  if (hideChannel) {
+    e.preventDefault();
+    const channel = hideChannel.dataset.ytHideChannel;
+    store.addHiddenChannel(channel);
+    toast(`Hidden ${channel}`);
     return;
   }
 
@@ -680,6 +689,16 @@ function mountSettings(root) {
   paintTopics();
   topicsChangedHook = paintTopics;
 
+  const paintFilters = () => {
+    const list = root.querySelector('.settings-filters');
+    const badge = root.querySelector('[data-filter-count]');
+    const status = root.querySelector('[data-filter-status]');
+    if (list) list.innerHTML = settingsFiltersHtml();
+    if (badge) badge.textContent = `${store.hiddenKeywords().length + store.hiddenChannels().length} hidden`;
+    if (status) status.textContent = '';
+  };
+  paintFilters();
+
   const showReady = (version) => {
     if (!install || !version) return;
     install.hidden = false;
@@ -723,6 +742,58 @@ function mountSettings(root) {
   });
 
   root.querySelector('[data-manage-topics]')?.addEventListener('click', openTopics);
+
+  root.querySelector('[data-manage-keyword]')?.addEventListener('click', () => {
+    openPrompt({
+      title: 'Add keyword filter',
+      label: 'Keyword',
+      placeholder: 'e.g. vlog, reaction, trailer…',
+      confirmText: 'Hide videos',
+      onSubmit: (value) => {
+        const added = store.addHiddenKeyword(value);
+        if (!added) {
+          toast('That keyword is already hidden');
+          return;
+        }
+        paintFilters();
+        toast(`Hiding videos with “${added}”.`);
+      },
+    });
+  });
+
+  root.querySelector('[data-manage-channel]')?.addEventListener('click', () => {
+    openPrompt({
+      title: 'Add channel filter',
+      label: 'Channel name',
+      placeholder: 'e.g. MrBeast',
+      confirmText: 'Hide channel',
+      onSubmit: (value) => {
+        const added = store.addHiddenChannel(value);
+        if (!added) {
+          toast('That channel is already hidden');
+          return;
+        }
+        paintFilters();
+        toast(`Hiding videos from “${added}”.`);
+      },
+    });
+  });
+
+  root.addEventListener('click', (event) => {
+    const removeKeyword = event.target.closest('[data-remove-keyword]');
+    if (removeKeyword) {
+      store.removeHiddenKeyword(removeKeyword.dataset.removeKeyword);
+      paintFilters();
+      toast('Keyword filter removed');
+      return;
+    }
+    const removeChannel = event.target.closest('[data-remove-channel]');
+    if (removeChannel) {
+      store.removeHiddenChannel(removeChannel.dataset.removeChannel);
+      paintFilters();
+      toast('Channel filter removed');
+    }
+  });
 
   root.querySelector('[data-settings-topics]')?.addEventListener('click', (event) => {
     const remove = event.target.closest('[data-topic-remove]');
@@ -988,7 +1059,7 @@ function renderRoute() {
     }
   } else if (seg[0] === 'results') {
     const q = url.searchParams.get('search_query') || '';
-    html = renderResults(q);
+    html = renderResults({ query: q });
     mount = () => {
       mountResults(view, q);
     };
