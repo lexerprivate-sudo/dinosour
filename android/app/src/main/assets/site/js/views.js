@@ -67,6 +67,7 @@ export function renderHome({ topic = 'All' } = {}) {
 
   return `${renderChips(topic)}
   ${!isTopic ? resumeRailHtml() : ''}
+  ${!isTopic ? mixesRailHtml() : ''}
   ${
     isTopic
       ? `<section class="topic-banner">
@@ -89,6 +90,28 @@ export function renderHome({ topic = 'All' } = {}) {
     <button type="button" class="btn-more" data-home-retry>Try again</button>
   </div>
   <div class="feed-sentinel" data-home-sentinel aria-hidden="true"></div>`;
+}
+
+/* Recent auto-generated mixes, shown on Home for quick access. */
+function mixesRailHtml() {
+  const mixes = store.recentMixes();
+  if (!mixes.length) return '';
+  return `<section class="resume-rail mixes-rail" aria-label="Music mixes">
+    <div class="resume-head">
+      <h2>${icon('shuffle')} Your mixes</h2>
+      <a class="text-btn" href="/feed/mixes" data-link>See all</a>
+    </div>
+    <div class="resume-track">${mixes
+      .slice(0, 8)
+      .map(
+        (m) => `<a class="mix-mini" href="/mix/${encodeURIComponent(m.id)}" data-link>
+          <img src="${esc(m.seed?.thumb || '')}" alt="" loading="lazy">
+          <span class="mix-mini-label">Mix</span>
+          <span class="mix-mini-sub">${esc((m.seed?.title || '').slice(0, 40))}</span>
+        </a>`
+      )
+      .join('')}</div>
+  </section>`;
 }
 
 /* Continue watching: a rail of in-progress YouTube videos. */
@@ -1288,6 +1311,7 @@ export function renderRemoteWatch(id, info = null) {
           <button class="action-btn ${liked ? 'liked' : ''}" type="button" data-yt-like aria-pressed="${liked}">${icon('thumb-up')} <span data-yt-like-label>${liked ? 'Liked' : 'Like'}</span></button>
           <button class="action-btn ${savedYt ? 'active' : ''}" type="button" data-yt-save aria-pressed="${savedYt}">${icon(savedYt ? 'check' : 'save')} <span data-yt-save-label>${savedYt ? 'Saved' : 'Watch later'}</span></button>
           <button class="action-btn" type="button" data-yt-playlist>${icon('plus')} Playlist</button>
+          <button class="action-btn action-mix" type="button" data-yt-mix title="Make a music mix from this song">${icon('shuffle')} Mix</button>
           ${APP_MODE ? `<button class="action-btn" type="button" data-yt-pip title="Picture in picture">${icon('fullscreen')} PiP</button>` : ''}
           <a class="action-btn" href="https://www.youtube.com/watch?v=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">${icon('play')} Open on YouTube</a>
           <button class="action-btn" data-copy-remote>${icon('share')} Copy link</button>
@@ -2071,6 +2095,27 @@ export function mountRemoteWatch(root, id) {
     }
   });
   root.querySelector('[data-copy-remote]')?.addEventListener('click', () => copyLink());
+  root.querySelector('[data-yt-mix]')?.addEventListener('click', async () => {
+    const button = root.querySelector('[data-yt-mix]');
+    button?.setAttribute('disabled', '');
+    try {
+      const seed = { ...meta, id };
+      let tracks = relatedVideos.length ? relatedVideos : [];
+      if (!tracks.length) {
+        tracks = await buildMix(seed, searchYouTube, { count: 20, topic: '' }).catch(async () => {
+          const fallback = await searchYouTube(String(meta.title || '').split('|')[0].trim());
+          return fallback.videos || [];
+        });
+      }
+      tracks = dedupeTracks(tracks, seed.title, 20, 2);
+      store.saveMix({ id, seed, tracks });
+      toast(`Mix created from ${tracks.length} songs`);
+      navigate(`/mix/${encodeURIComponent(id)}`);
+    } catch {
+      toast('Could not build a mix right now.');
+      button?.removeAttribute('disabled');
+    }
+  });
 
   // This video is playing now, so it no longer waits in Up Next.
   store.removeFromQueue(id);

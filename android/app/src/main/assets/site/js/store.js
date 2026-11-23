@@ -3,6 +3,15 @@
 const KEY = 'dinosour.v1';
 const LEGACY_KEYS = ['watch.v1', 'tot.v1'];
 
+/* Some older queue/history entries can hold an array of video objects where
+   a single id was expected. Always reduce ids to a real YouTube id. */
+function cleanId(value) {
+  if (Array.isArray(value)) return cleanId(value[0]);
+  const s = String(value || '');
+  const match = s.match(/^[A-Za-z0-9_-]{11}/);
+  return match ? match[0] : '';
+}
+
 const defaults = {
   theme: 'dark',
   mini: false,
@@ -25,6 +34,7 @@ const defaults = {
   ytLiked: [],
   ytSaved: [],
   playlists: [],
+  mixes: [],
   ytRate: 1,
   ytQuality: 'auto',
   sleepTimer: 0,
@@ -57,8 +67,8 @@ const TRENDING_CATEGORIES = [
 /* YouTube items are stored with their metadata, because remote videos have no
    local catalog record to look up later. */
 function ytEntry(video) {
-  if (!video || !video.id) return null;
-  const id = String(video.id);
+  const id = cleanId(video?.id);
+  if (!id) return null;
   return {
     id,
     title: String(video.title || 'YouTube video').slice(0, 220),
@@ -395,12 +405,13 @@ export const store = {
   },
 
   saveResume(entry) {
-    if (!entry || !entry.id) return;
+    const id = cleanId(entry?.id);
+    if (!id) return;
     const t = Number(entry.t);
     const d = Number(entry.d);
     if (!Number.isFinite(t) || !Number.isFinite(d) || d <= 0) return;
 
-    const rest = this.resumeList().filter((r) => r.id !== entry.id);
+    const rest = this.resumeList().filter((r) => r.id !== id);
     // Finished, or barely started: drop it instead of keeping a stale row.
     if (t < 4 || t > d - 6) {
       this.state.resume = rest;
@@ -409,7 +420,7 @@ export const store = {
     }
 
     rest.unshift({
-      id: entry.id,
+      id,
       title: entry.title || 'YouTube video',
       channel: entry.channel || '',
       thumb: entry.thumb || `https://i.ytimg.com/vi/${entry.id}/mqdefault.jpg`,
@@ -440,12 +451,13 @@ export const store = {
   },
 
   addToQueue(video, source = '') {
-    if (!video || !video.id) return false;
+    const id = cleanId(video?.id);
+    if (!id) return false;
     const entry = {
-      id: video.id,
+      id,
       title: video.title || 'YouTube video',
       channel: video.channel || 'YouTube',
-      thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
+      thumb: video.thumb || `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
       length: video.length || '',
       source,
     };
@@ -609,13 +621,14 @@ export const store = {
     const list = this.queueList();
     const seen = new Set(list.map((v) => v.id));
     for (const video of videos || []) {
-      if (!video?.id || seen.has(video.id)) continue;
-      seen.add(video.id);
+      const id = cleanId(video?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
       list.push({
-        id: video.id,
+        id,
         title: String(video.title || 'YouTube video').slice(0, 220),
         channel: String(video.channel || 'YouTube').slice(0, 120),
-        thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
+        thumb: video.thumb || `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
         length: String(video.length || ''),
         source,
       });
@@ -742,6 +755,35 @@ export const store = {
 
   playlistById(id) {
     return this.playlistsList().find((p) => p.id === id) || null;
+  },
+
+  /* Auto-generated music mixes, newest first. */
+  recentMixes() {
+    return Array.isArray(this.state.mixes) ? this.state.mixes.filter((m) => m && m.id && m.seed) : [];
+  },
+
+  mixById(id) {
+    return this.recentMixes().find((m) => m.id === id) || null;
+  },
+
+  saveMix(mix) {
+    const id = cleanId(mix?.seed?.id);
+    if (!id) return null;
+    const entry = {
+      id,
+      seed: { ...mix.seed, id },
+      tracks: Array.isArray(mix.tracks) ? mix.tracks.slice(0, 30) : [],
+      createdAt: Date.now(),
+    };
+    const rest = this.recentMixes().filter((m) => m.id !== entry.id);
+    this.state.mixes = [entry, ...rest].slice(0, 8);
+    this.save();
+    return entry;
+  },
+
+  clearMixes() {
+    this.state.mixes = [];
+    this.save();
   },
 
   createPlaylist(name) {

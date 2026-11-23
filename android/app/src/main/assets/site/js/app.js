@@ -8,6 +8,7 @@ import { attachStream, detachStream } from './stream.js';
 import { suggestYouTube } from './yt.js';
 import { closeMini, openMini } from './mini.js';
 import { onMediaCommand, setAppVisible, stopMedia } from './media.js';
+import { renderMix, mountMix, renderMixes, mountMixes } from './mix-pages.js';
 import {
   mountAccount,
   mountChannel,
@@ -86,6 +87,7 @@ const NAV = [
   { key: 'watch-later', href: '/feed/watch-later', label: 'Watch later', icon: 'clock' },
   { key: 'liked', href: '/feed/liked', label: 'Liked videos', icon: 'thumb-up' },
   { key: 'playlists', href: '/feed/playlists', label: 'Playlists', icon: 'music' },
+  { key: 'mixes', href: '/feed/mixes', label: 'Music mixes', icon: 'shuffle' },
 ];
 
 function buildSidebar() {
@@ -319,6 +321,11 @@ document.addEventListener('click', (e) => {
     // route so the watch page starts playback without a second play tap.
     const target = new URL(href, location.href);
     if (target.origin === location.origin && target.pathname.startsWith('/watch/yt/')) {
+      // Some older queue/history entries stored an array of video objects as
+      // the id. Recover the real 11-character id before navigating so the
+      // watch route never breaks with "[object Object]" in the URL.
+      const idMatch = target.pathname.match(/^\/watch\/yt\/([A-Za-z0-9_-]{11})/);
+      if (idMatch) target.pathname = `/watch/yt/${idMatch[1]}`;
       target.searchParams.set('autoplay', '1');
     }
     navigate(`${target.pathname}${target.search}${target.hash}`);
@@ -984,6 +991,7 @@ const TITLES = {
   'watch-later': 'Watch later',
   liked: 'Liked videos',
   playlists: 'Playlists',
+  mixes: 'Music mixes',
 };
 
 function renderRoute() {
@@ -1040,15 +1048,33 @@ function renderRoute() {
     title = 'Settings';
     searchInput.value = '';
     searchClear.hidden = true;
-  } else if (seg[0] === 'watch' && seg[1] === 'yt' && /^[\w-]{11}$/.test(seg[2] || '')) {
-    const id = seg[2];
-    html = renderRemoteWatch(id);
+  } else if (seg[0] === 'mix' && seg[1]) {
+    html = renderMix(seg[1]);
     mount = () => {
-      currentWatch = mountRemoteWatch(view, id);
+      mountMix(view, seg[1]);
     };
-    title = 'YouTube';
-    searchInput.value = '';
-    searchClear.hidden = true;
+    title = 'Mix';
+  } else if (seg[0] === 'watch' && seg[1] === 'yt') {
+    // Recover from malformed links (e.g. a list of video objects used as an id)
+    // by taking the first valid YouTube id from the segment.
+    const recovered = String(seg[2] || '').match(/^[A-Za-z0-9_-]{11}/)?.[0];
+    if (recovered && recovered !== seg[2]) {
+      const query = url.search.toString();
+      history.replaceState(history.state, '', `/watch/yt/${recovered}${query ? `?${query}` : ''}`);
+    }
+    const id = recovered || '';
+    if (/^[\w-]{11}$/.test(id)) {
+      html = renderRemoteWatch(id);
+      mount = () => {
+        currentWatch = mountRemoteWatch(view, id);
+      };
+      title = 'YouTube';
+      searchInput.value = '';
+      searchClear.hidden = true;
+    } else {
+      html = renderNotFound();
+      title = 'Not found';
+    }
   } else if (seg[0] === 'watch' && seg[1]) {
     const video = videoById(seg[1]);
     if (video) {
@@ -1073,6 +1099,12 @@ function renderRoute() {
       searchInput.value = q;
       searchClear.hidden = !q;
     }
+  } else if (seg[0] === 'feed' && seg[1] === 'mixes') {
+    html = renderMixes();
+    mount = () => {
+      mountMixes(view);
+    };
+    title = 'Music mixes';
   } else if (seg[0] === 'feed' && seg[1] === 'playlists') {
     html = renderLibrary('playlists');
     mount = () => {
