@@ -48,7 +48,9 @@ export function renderChips(active = 'All') {
 
 export function renderHome({ topic = 'All' } = {}) {
   const isTopic = topic && topic !== 'All';
-  const showLocal = !APP_MODE && !isTopic;
+  // The bundled original/demo library lives in the app; on localhost it is
+  // only test content, so keep it out of the way there.
+  const showLocal = APP_MODE && !isTopic;
   const list = showLocal ? longVideos().filter((v) => !store.isFiltered(v)) : [];
   const shorts = showLocal ? shortVideos().filter((v) => !store.isFiltered(v)) : [];
 
@@ -925,14 +927,14 @@ export function renderResults({ query = '', sort = 'relevance' } = {}) {
     return `<div class="results">${emptyState({
       iconName: 'search',
       title: 'Search',
-      text: APP_MODE ? 'Search YouTube.' : 'Search YouTube or this site.',
+      text: APP_MODE ? 'Search YouTube or this site.' : 'Search YouTube.',
       actionHref: '/',
       actionText: 'Browse home',
     })}</div>`;
   }
 
-  const local = APP_MODE ? [] : searchVideos(q);
-  const chans = APP_MODE ? [] : searchChannels(q);
+  const local = APP_MODE ? searchVideos(q) : [];
+  const chans = APP_MODE ? searchChannels(q) : [];
 
   const chanStrip = chans.length
     ? `<div class="channel-strip">${chans
@@ -997,7 +999,7 @@ export async function mountResults(root, query, sort = 'relevance') {
   const sentinel = root.querySelector('[data-yt-sentinel]');
   if (!list || !more || !status) return;
 
-  const localCount = APP_MODE ? 0 : searchVideos(query).length;
+  const localCount = APP_MODE ? searchVideos(query).length : 0;
   let continuation = null;
   let busy = false;
   let order = RESULT_SORTS.some(([k]) => k === sort) ? sort : 'relevance';

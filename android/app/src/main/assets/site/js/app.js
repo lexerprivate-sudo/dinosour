@@ -208,7 +208,7 @@ function showSuggestions() {
   }
 
   suggestionToken += 1;
-  const localRows = APP_MODE ? [] : localSuggestionRows(q);
+  const localRows = APP_MODE ? localSuggestionRows(q) : [];
   paintSuggestions(localRows);
   // paintSuggestions() hides and bumps the token when there are no rows yet.
   const token = suggestionToken;

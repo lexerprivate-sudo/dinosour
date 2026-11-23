@@ -9,6 +9,24 @@ import { buildMix } from './mix.js';
 
 const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
 
+/* A mix link carries its seed so it can be played on another device even when
+   the recipient does not have that mix saved locally. */
+function mixSeedFromUrl(id) {
+  const p = new URLSearchParams(location.search);
+  const title = p.get('t') || '';
+  if (!title) return null;
+  return { id, title, channel: p.get('c') || 'YouTube', thumb: p.get('th') || '' };
+}
+
+function mixLink(id, seed) {
+  const p = new URLSearchParams();
+  if (seed?.title) p.set('t', seed.title);
+  if (seed?.channel) p.set('c', seed.channel);
+  if (seed?.thumb) p.set('th', seed.thumb);
+  const query = p.toString();
+  return `${location.origin}/mix/${encodeURIComponent(id)}${query ? `?${query}` : ''}`;
+}
+
 function queueAttrs(v) {
   return `data-add-queue="${esc(v.id)}" data-q-title="${esc(v.title)}" data-q-channel="${esc(
     v.channel || 'YouTube'
@@ -33,7 +51,13 @@ function mixTrackHtml(v, i) {
 }
 
 export function renderMix(id) {
-  const mix = store.mixById(id);
+  let mix = store.mixById(id);
+  if (!mix) {
+    const seed = mixSeedFromUrl(id);
+    if (seed) {
+      mix = store.saveMix({ id, seed, tracks: [] });
+    }
+  }
   if (!mix) {
     return `<div class="page">${emptyState({
       iconName: 'music',
@@ -61,6 +85,7 @@ export function renderMix(id) {
           <button type="button" class="btn-primary" data-mix-play ${tracks.length ? '' : 'disabled'}>${icon('play')} Play all</button>
           <button type="button" class="btn-outline" data-mix-shuffle ${tracks.length ? '' : 'disabled'}>${icon('shuffle')} Shuffle</button>
           <button type="button" class="btn-outline" data-mix-refresh>${icon('refresh')} Refresh</button>
+          <button type="button" class="btn-outline" data-mix-copy>${icon('share')} Copy link</button>
         </div>
       </div>
     </div>
@@ -96,11 +121,8 @@ export function mountMix(root, id) {
     navigate(`/watch/yt/${encodeURIComponent(first.id)}?autoplay=1`);
   };
 
-  root.querySelector('[data-mix-play]')?.addEventListener('click', () => play(false));
-  root.querySelector('[data-mix-shuffle]')?.addEventListener('click', () => play(true));
-  root.querySelector('[data-mix-refresh]')?.addEventListener('click', async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
+  const rebuild = async (button) => {
+    if (button) button.disabled = true;
     try {
       const seed = store.mixById(id)?.seed;
       const tracks = await buildMix(seed, searchYouTube, { count: 20, topic: '' });
@@ -110,7 +132,28 @@ export function mountMix(root, id) {
     } catch {
       toast('Could not refresh this mix.');
     } finally {
-      button.disabled = false;
+      if (button) button.disabled = false;
+    }
+  };
+
+  root.querySelector('[data-mix-play]')?.addEventListener('click', () => play(false));
+  root.querySelector('[data-mix-shuffle]')?.addEventListener('click', () => play(true));
+  root.querySelector('[data-mix-refresh]')?.addEventListener('click', (event) => rebuild(event.currentTarget));
+  root.querySelector('[data-mix-copy]')?.addEventListener('click', async () => {
+    const link = mixLink(id, store.mixById(id)?.seed);
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(link);
+      else {
+        const ta = document.createElement('textarea');
+        ta.value = link;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      toast('Mix link copied');
+    } catch {
+      toast('Could not copy the link');
     }
   });
 
@@ -126,6 +169,9 @@ export function mountMix(root, id) {
     });
     toast(added ? 'Added to Up Next' : 'Already in Up Next');
   });
+
+  // A mix opened from a copied link has a seed but no tracks yet.
+  if (!(store.mixById(id)?.tracks || []).length) rebuild(null);
 }
 
 export function renderMixes() {
