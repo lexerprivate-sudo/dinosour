@@ -24,6 +24,7 @@ import {
 import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, timeAgo, APP_MODE } from './util.js';
 import { navigate, openMenu, openPrompt, toast } from './ui.js';
 import { searchYouTube, videoInfo } from './yt.js';
+import { buildMix, dedupeTracks } from './mix.js';
 import { clearMediaTarget, isAppVisible, reportMedia, setMediaTarget } from './media.js';
 
 const icon = (name, cls = '') =>
@@ -981,9 +982,12 @@ export async function mountResults(root, query, sort = 'relevance') {
   const alive = () => list.isConnected;
 
   const applyView = () => {
-    const shown = all
-      .filter((v) => !store.isFiltered(v))
-      .sort((a, b) =>
+    const shown = dedupeTracks(
+      all.filter((v) => !store.isFiltered(v)),
+      query,
+      60,
+      1
+    ).sort((a, b) =>
         order === 'views'
           ? parseViews(b.viewsText) - parseViews(a.viewsText)
           : order === 'newest'
@@ -2311,8 +2315,9 @@ export function mountRemoteWatch(root, id) {
     const relatedEl = root.querySelector('[data-yt-related-list]');
     if (!relatedEl) return;
 
-    // Topic of the video the user clicked first; the channel is only a
-    // fallback. This makes Up Next similar to what was watched/searched.
+    // Build a varied mix in the same style: search several related queries
+    // instead of the full title, which used to return the same song from every
+    // lyric channel. Deduplication keeps one upload per track.
     const titleSeed = String(meta.title || '').replace(/\s*\|.*$/, '').trim();
     let searchedTopic = '';
     try {
@@ -2320,19 +2325,19 @@ export function mountRemoteWatch(root, id) {
     } catch {
       /* storage may be unavailable */
     }
-    const seed = titleSeed && titleSeed !== 'YouTube video'
-      ? titleSeed
-      : (searchedTopic || root.dataset.query || '');
-    if (!seed) {
+    if (!titleSeed && !searchedTopic) {
       relatedEl.innerHTML = '<p class="related-empty">No related videos found.</p>';
       return;
     }
 
     try {
-      const data = await searchYouTube(seed);
+      const videos = await buildMix(
+        { title: titleSeed, id, channel: meta.channel },
+        searchYouTube,
+        { count: 12, topic: searchedTopic }
+      );
       if (destroyed || !playerEl?.isConnected) return;
       // Related videos stay normal — account mode only restricts autoplay.
-      const videos = (data.videos || []).filter((v) => v.id !== id).slice(0, 12);
       relatedVideos = videos;
       paintQueue();
       relatedEl.innerHTML = videos.length
