@@ -773,6 +773,7 @@ export const store = {
       id,
       seed: { ...mix.seed, id },
       tracks: Array.isArray(mix.tracks) ? mix.tracks.slice(0, 30) : [],
+      topic: String(mix.topic || '').slice(0, 200),
       createdAt: Date.now(),
     };
     const rest = this.recentMixes().filter((m) => m.id !== entry.id);

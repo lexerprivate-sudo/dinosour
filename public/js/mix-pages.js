@@ -11,11 +11,12 @@ const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${nam
 
 /* A mix link carries its seed so it can be played on another device even when
    the recipient does not have that mix saved locally. */
-function mixSeedFromUrl(id) {
+function mixFromUrl(id) {
   const p = new URLSearchParams(location.search);
   const title = p.get('t') || '';
   if (!title) return null;
-  return { id, title, channel: p.get('c') || 'YouTube', thumb: p.get('th') || '' };
+  const seed = { id, title, channel: p.get('c') || 'YouTube', thumb: p.get('th') || '' };
+  return { seed, topic: p.get('q') || '' };
 }
 
 function mixLink(id, seed) {
@@ -23,6 +24,8 @@ function mixLink(id, seed) {
   if (seed?.title) p.set('t', seed.title);
   if (seed?.channel) p.set('c', seed.channel);
   if (seed?.thumb) p.set('th', seed.thumb);
+  const topic = store.mixById(id)?.topic;
+  if (topic) p.set('q', topic);
   const query = p.toString();
   return `${location.origin}/mix/${encodeURIComponent(id)}${query ? `?${query}` : ''}`;
 }
@@ -53,9 +56,9 @@ function mixTrackHtml(v, i) {
 export function renderMix(id) {
   let mix = store.mixById(id);
   if (!mix) {
-    const seed = mixSeedFromUrl(id);
-    if (seed) {
-      mix = store.saveMix({ id, seed, tracks: [] });
+    const fromUrl = mixFromUrl(id);
+    if (fromUrl) {
+      mix = store.saveMix({ id, seed: fromUrl.seed, tracks: [], topic: fromUrl.topic });
     }
   }
   if (!mix) {
@@ -124,9 +127,12 @@ export function mountMix(root, id) {
   const rebuild = async (button) => {
     if (button) button.disabled = true;
     try {
-      const seed = store.mixById(id)?.seed;
-      const tracks = await buildMix(seed, searchYouTube, { count: 20, topic: '' });
-      store.saveMix({ id, seed, tracks });
+      const current = store.mixById(id);
+      const tracks = await buildMix(current.seed, searchYouTube, {
+        count: 20,
+        topic: current.topic || '',
+      });
+      store.saveMix({ id, seed: current.seed, topic: current.topic, tracks });
       paint();
       toast(`Refreshed ${tracks.length} songs`);
     } catch {

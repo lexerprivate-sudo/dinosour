@@ -2102,15 +2102,21 @@ export function mountRemoteWatch(root, id) {
     button?.setAttribute('disabled', '');
     try {
       const seed = { ...meta, id };
+      let topic = '';
+      try {
+        topic = sessionStorage.getItem('dinosour.lastQuery') || '';
+      } catch {
+        /* storage may be unavailable */
+      }
       let tracks = relatedVideos.length ? relatedVideos : [];
       if (!tracks.length) {
-        tracks = await buildMix(seed, searchYouTube, { count: 20, topic: '' }).catch(async () => {
+        tracks = await buildMix(seed, searchYouTube, { count: 20, topic }).catch(async () => {
           const fallback = await searchYouTube(String(meta.title || '').split('|')[0].trim());
           return fallback.videos || [];
         });
       }
-      tracks = dedupeTracks(tracks, seed.title, 20, 2);
-      store.saveMix({ id, seed, tracks });
+      tracks = dedupeTracks(tracks, seed.title, 20, 1, seed);
+      store.saveMix({ id, seed, tracks, topic });
       toast(`Mix created from ${tracks.length} songs`);
       navigate(`/mix/${encodeURIComponent(id)}`);
     } catch {
