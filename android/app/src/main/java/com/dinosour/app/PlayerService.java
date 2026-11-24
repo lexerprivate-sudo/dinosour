@@ -25,6 +25,15 @@ public class PlayerService extends MediaSessionService {
     public static final String EXTRA_VIDEO_URL = "video_url";
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_CHANNEL = "channel";
+    public static final String ACTION_PAUSE = "com.dinosour.app.PLAYER_PAUSE";
+    public static final String ACTION_RESUME = "com.dinosour.app.PLAYER_RESUME";
+
+    private static volatile String currentVideoId = null;
+
+    /** True when the service is already playing this video (PiP must not restart it). */
+    public static boolean isPlayingVideo(String id) {
+        return id != null && id.equals(currentVideoId);
+    }
 
     private MediaSession session;
     private volatile boolean destroyed = false;
@@ -75,6 +84,21 @@ public class PlayerService extends MediaSessionService {
             MainActivity.sendMediaCommand("next");
             return START_STICKY;
         }
+        String action = intent != null ? intent.getAction() : null;
+        if (ACTION_PAUSE.equals(action) || ACTION_RESUME.equals(action)) {
+            if (session != null) {
+                Player player = session.getPlayer();
+                boolean resume = ACTION_RESUME.equals(action);
+                new android.os.Handler(player.getApplicationLooper()).post(() -> {
+                    try {
+                        if (resume) player.play();
+                        else player.pause();
+                    } catch (Throwable ignored) {
+                    }
+                });
+            }
+            return START_STICKY;
+        }
         if (intent == null || session == null) {
             MainActivity.notifyNativeFailure();
             return START_STICKY;
@@ -83,6 +107,8 @@ public class PlayerService extends MediaSessionService {
         final String title = intent.getStringExtra(EXTRA_TITLE);
         final String channel = intent.getStringExtra(EXTRA_CHANNEL);
         if (url == null) return START_STICKY;
+        int mark = url.indexOf("watch?v=");
+        currentVideoId = mark >= 0 ? url.substring(mark + 8, Math.min(url.length(), mark + 19)) : null;
         loading = true;
         new Thread(() -> {
             MediaSession ref = session;

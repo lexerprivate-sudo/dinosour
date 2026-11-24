@@ -215,6 +215,7 @@ export const store = {
   clearHistory() {
     this.state.history = [];
     this.state.progress = {};
+    this.state.watchTrail = [];
     this.save();
   },
 
@@ -463,7 +464,7 @@ export const store = {
     };
     // Native clients (LibreTube PlayingQueue.add) move an existing copy to the
     // tail instead of silently doing nothing.
-    this.state.queue = [...this.queueList().filter((v) => v.id !== video.id), entry].slice(-30);
+    this.state.queue = [...this.queueList().filter((v) => v.id !== id), entry].slice(-30);
     this.save();
     return true;
   },
@@ -478,6 +479,7 @@ export const store = {
 
   clearQueue() {
     this.state.queue = [];
+    this.state.nextCursor = 0;
     this.save();
   },
 
@@ -644,14 +646,15 @@ export const store = {
    * clicks in click order instead of reversing them (REA finding).
    */
   playNextVideo(video, source = '') {
-    if (!video?.id) return false;
-    const without = this.queueList().filter((v) => v.id !== video.id);
+    const id = cleanId(video?.id);
+    if (!id) return false;
+    const without = this.queueList().filter((v) => v.id !== id);
     const cursor = Math.min(Number(this.state.nextCursor) || 0, without.length);
     without.splice(cursor, 0, {
-      id: video.id,
+      id,
       title: video.title || 'YouTube video',
       channel: video.channel || 'YouTube',
-      thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`,
+      thumb: video.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(id)}/mqdefault.jpg`,
       length: video.length || '',
       source,
     });

@@ -2,7 +2,7 @@
 
 import { store } from './store.js';
 import { emptyState } from './components.js';
-import { esc } from './util.js';
+import { esc, shuffleArray } from './util.js';
 import { navigate, toast } from './ui.js';
 import { searchYouTube } from './yt.js';
 import { buildMix } from './mix.js';
@@ -112,12 +112,19 @@ export function mountMix(root, id) {
     }
     const meta = root.querySelector('.mix-meta');
     if (meta) meta.textContent = `${(current.tracks || []).length} similar songs · from ${current.seed?.channel || 'YouTube'}`;
+    // A mix opened from a shared link starts with no tracks, so Play all and
+    // Shuffle are rendered disabled; enable them once Refresh fills the list.
+    const hasTracks = (current.tracks || []).length > 0;
+    for (const selector of ['[data-mix-play]', '[data-mix-shuffle]']) {
+      const button = root.querySelector(selector);
+      if (button) button.disabled = !hasTracks;
+    }
   };
 
   const play = (shuffle) => {
-    const tracks = [...(store.mixById(id)?.tracks || [])];
-    if (!tracks.length) return;
-    if (shuffle) tracks.sort(() => Math.random() - 0.5);
+    const saved = [...(store.mixById(id)?.tracks || [])];
+    if (!saved.length) return;
+    const tracks = shuffle ? shuffleArray(saved) : saved;
     const [first, ...rest] = tracks;
     store.clearQueue();
     store.addManyToQueue(rest, 'mix:' + id);

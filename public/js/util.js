@@ -138,6 +138,16 @@ export function uid(prefix = 'c') {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** Uniform Fisher–Yates shuffle (sort(() => Math.random() - 0.5) is biased). */
+export function shuffleArray(values) {
+  const out = [...(values || [])];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 export const prefersReducedMotion = () =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 

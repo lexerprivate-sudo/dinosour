@@ -765,6 +765,32 @@ public class MainActivity extends Activity {
       });
     }
 
+    /** Native player: lock-screen / notification pause. */
+    @JavascriptInterface
+    public void pauseVideo() {
+        ui.post(() -> {
+            try {
+                Intent intent = new Intent(MainActivity.this, PlayerService.class);
+                intent.setAction(PlayerService.ACTION_PAUSE);
+                startService(intent);
+            } catch (Throwable ignored) {
+            }
+        });
+    }
+
+    /** Native player: lock-screen / notification resume. */
+    @JavascriptInterface
+    public void resumeVideo() {
+        ui.post(() -> {
+            try {
+                Intent intent = new Intent(MainActivity.this, PlayerService.class);
+                intent.setAction(PlayerService.ACTION_RESUME);
+                startService(intent);
+            } catch (Throwable ignored) {
+            }
+        });
+    }
+
     /** Native player: open the standalone player in picture-in-picture mode. */
     @JavascriptInterface
     public void pipVideo() {

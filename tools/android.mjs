@@ -63,6 +63,13 @@ function runGradle(args) {
 async function main() {
   console.log(`Using Android SDK ${path.basename(path.join(SDK, 'platforms'))} at ${SDK}`);
 
+  // Keep the WebView bundle in lockstep with the web app. A manual copy used
+  // to be easy to forget, which shipped an APK running older JS than the site.
+  const siteFrom = path.join(ROOT, 'public');
+  const siteTo = path.join(ANDROID, 'app', 'src', 'main', 'assets', 'site');
+  await fs.cp(siteFrom, siteTo, { recursive: true, force: true });
+  console.log('• synced public/ → Android assets/site/');
+
   const pkg = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8'));
   const versionName = String(pkg.version || '1.0.0');
   const parts = versionName.split('.').map((n) => parseInt(n, 10) || 0);

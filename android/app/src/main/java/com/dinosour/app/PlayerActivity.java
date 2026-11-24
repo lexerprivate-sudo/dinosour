@@ -72,6 +72,19 @@ public class PlayerActivity extends AppCompatActivity {
         root.addView(pipButton, btnParams);
         setContentView(root);
 
+        // Enable auto-enter at creation time. Doing it only inside enterPip()
+        // means swiping away from the app never creates a PiP on Android 12+.
+        if (Build.VERSION.SDK_INT >= 31) {
+            try {
+                PictureInPictureParams params = new PictureInPictureParams.Builder()
+                        .setAutoEnterEnabled(true)
+                        .setSeamlessResizeEnabled(true)
+                        .build();
+                setPictureInPictureParams(params);
+            } catch (Throwable ignored) {
+            }
+        }
+
         receiver = new PipReceiver();
         try {
             // One filter with all actions. Two-arg registerReceiver throws
@@ -131,6 +144,12 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void startVideo() {
         if (videoId == null || videoId.isEmpty() || videoId.equals(lastStartedVideoId)) return;
+        // PiP reuses the activity while the service is already playing; sending
+        // the same URL again restarted ExoPlayer from 0:00.
+        if (PlayerService.isPlayingVideo(videoId)) {
+            lastStartedVideoId = videoId;
+            return;
+        }
         lastStartedVideoId = videoId;
         Intent intent = new Intent(this, PlayerService.class);
         intent.putExtra(PlayerService.EXTRA_VIDEO_URL,

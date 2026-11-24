@@ -309,7 +309,8 @@ export class Player {
     // Brief animated confirmation for keyboard / double-tap seeks.
     const bubble = document.createElement('span');
     bubble.className = 'seek-feedback ' + (seconds < 0 ? 'left' : 'right');
-    bubble.textContent = seconds < 0 ? '« 10 seconds' : '10 seconds »';
+    const amount = Math.abs(seconds);
+    bubble.textContent = seconds < 0 ? `« ${amount} seconds` : `${amount} seconds »`;
     this.media.parentElement?.appendChild(bubble);
     setTimeout(() => bubble.remove(), 600);
   }
@@ -324,6 +325,7 @@ export class Player {
     e.preventDefault();
     this.progress.classList.add('dragging');
     this.progress.setPointerCapture?.(e.pointerId);
+    const wasPlaying = !this.media.paused;
     this.media.pause();
     const move = (ev) => {
       const r = this.ratioFromEvent(ev);
@@ -338,6 +340,7 @@ export class Player {
       this.media.currentTime = this.ratioFromEvent(ev) * this.media.duration;
       this.paintTime();
       this.saveProgress();
+      if (wasPlaying) this.safePlay();
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up, { once: true });
@@ -376,8 +379,12 @@ export class Player {
     const b = this.media.buffered;
     let end = 0;
     for (let i = 0; i < b.length; i++) {
-      if (b.start(i) <= this.media.currentTime + 0.5) end = Math.max(end, b.end(i));
-      else end = Math.max(end, b.end(i));
+      const start = b.start(i);
+      if (start <= this.media.currentTime + 0.5 && b.end(i) >= this.media.currentTime) {
+        end = b.end(i);
+        break;
+      }
+      if (start <= this.media.currentTime + 0.5) end = Math.max(end, b.end(i));
     }
     this.buffered.style.width = `${clamp((end / d) * 100, 0, 100)}%`;
   }

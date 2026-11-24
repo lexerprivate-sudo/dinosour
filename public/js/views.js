@@ -21,7 +21,7 @@ import {
   shortCardHtml,
   verifiedIcon,
 } from './components.js';
-import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, timeAgo, APP_MODE } from './util.js';
+import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, shuffleArray, timeAgo, APP_MODE } from './util.js';
 import { navigate, openMenu, openPrompt, toast } from './ui.js';
 import { searchYouTube, videoInfo } from './yt.js';
 import { buildMix, dedupeTracks } from './mix.js';
@@ -424,6 +424,7 @@ export async function mountTrending(root, { period, category, sort } = {}) {
     });
   });
 
+  root.__feedCleanup = () => observer.disconnect();
   return {};
 }
 
@@ -1002,17 +1003,22 @@ export async function mountResults(root, query, sort = 'relevance') {
   const localCount = APP_MODE ? searchVideos(query).length : 0;
   let continuation = null;
   let busy = false;
+  let failed = false;
   let order = RESULT_SORTS.some(([k]) => k === sort) ? sort : 'relevance';
   const all = [];
   const alive = () => list.isConnected;
 
   const applyView = () => {
-    const shown = dedupeTracks(
-      all.filter((v) => !store.isFiltered(v)),
-      query,
-      60,
-      1
-    ).sort((a, b) =>
+    // General search results are not a music mix — dedupe by video id only.
+    // Using dedupeTracks here threw away long videos, live streams and
+    // multiple uploads from the same channel (and anything mentioning the
+    // query words), which made ordinary searches look empty.
+    const unique = new Map();
+    for (const v of all) {
+      if (!v?.id || store.isFiltered(v)) continue;
+      if (!unique.has(v.id)) unique.set(v.id, v);
+    }
+    const shown = [...unique.values()].sort((a, b) =>
         order === 'views'
           ? parseViews(b.viewsText) - parseViews(a.viewsText)
           : order === 'newest'
@@ -1041,6 +1047,7 @@ export async function mountResults(root, query, sort = 'relevance') {
   const load = async (nextPage = false) => {
     if (busy) return;
     if (nextPage && !continuation) return;
+    failed = false;
     busy = true;
     more.disabled = true;
     if (loader) loader.hidden = false;
@@ -1057,7 +1064,7 @@ export async function mountResults(root, query, sort = 'relevance') {
       all.push(...videos);
       continuation = data.continuation || null;
       const shown = applyView();
-      more.hidden = true;
+      more.hidden = !continuation;
       more.textContent = 'Show more results';
       delete more.dataset.retry;
       paintCount();
@@ -1067,6 +1074,7 @@ export async function mountResults(root, query, sort = 'relevance') {
       }
     } catch {
       if (!alive()) return;
+      failed = true;
       if (!nextPage) list.innerHTML = '';
       setStatus('Couldn’t load YouTube results.');
       more.hidden = false;
@@ -1083,7 +1091,7 @@ export async function mountResults(root, query, sort = 'relevance') {
   };
 
   const maybeMore = () => {
-    if (busy || !continuation || !sentinel || !alive()) return;
+    if (busy || failed || !continuation || !sentinel || !alive()) return;
     if (sentinel.getBoundingClientRect().top < window.innerHeight + 900) load(true);
   };
 
@@ -1091,6 +1099,7 @@ export async function mountResults(root, query, sort = 'relevance') {
     if (more.dataset.retry !== undefined) {
       const retryNext = more.dataset.retry === '1';
       delete more.dataset.retry;
+      failed = false;
       load(retryNext);
     } else {
       load(true);
@@ -1314,7 +1323,7 @@ export function renderRemoteWatch(id, info = null) {
           <button class="action-btn ${savedYt ? 'active' : ''}" type="button" data-yt-save aria-pressed="${savedYt}">${icon(savedYt ? 'check' : 'save')} <span data-yt-save-label>${savedYt ? 'Saved' : 'Watch later'}</span></button>
           <button class="action-btn" type="button" data-yt-playlist>${icon('plus')} Playlist</button>
           <button class="action-btn action-mix" type="button" data-yt-mix title="Make a music mix from this song">${icon('shuffle')} Mix</button>
-          ${APP_MODE ? `<button class="action-btn" type="button" data-yt-pip title="Picture in picture">${icon('fullscreen')} PiP</button>` : ''}
+          ${APP_MODE ? `<button class="action-btn" type="button" data-yt-pip title="Picture in picture">${icon('pip')} PiP</button>` : ''}
           <a class="action-btn" href="https://www.youtube.com/watch?v=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">${icon('play')} Open on YouTube</a>
           <button class="action-btn" data-copy-remote>${icon('share')} Copy link</button>
         </div>
@@ -1459,7 +1468,12 @@ export function mountRemoteWatch(root, id) {
   let listenTries = 0;
   let destroyed = false;
   let relatedVideos = [];
+  // Suggested Up Next entries are not in the persisted queue, so hiding one
+  // needs its own per-view set (otherwise "Remove" shows a toast but nothing
+  // disappears when the queue is empty).
+  const hiddenSuggested = new Set();
   let endTimer = null;
+  let endNext = null;
   let endVisible = false;
   let endSuppressed = false;
   let playing = false;
@@ -1519,6 +1533,8 @@ export function mountRemoteWatch(root, id) {
     });
   };
 
+  const nativePlaying = () => APP_MODE && !!window.Dinosour?.playVideo && !frame;
+
   /* Lock-screen and notification controls for this watch page. */
   const mediaTarget = {
     play() {
@@ -1528,7 +1544,8 @@ export function mountRemoteWatch(root, id) {
       lastAdvance = Date.now();
       playing = true;
       syncMedia(true);
-      if (!playerEl.classList.contains('playing')) startPlayback();
+      if (nativePlaying()) window.Dinosour.resumeVideo?.();
+      else if (!playerEl.classList.contains('playing')) startPlayback();
       else send({ event: 'command', func: 'playVideo', args: [] });
     },
     pause() {
@@ -1537,7 +1554,8 @@ export function mountRemoteWatch(root, id) {
       pausedAt = Date.now();
       playing = false;
       syncMedia(false);
-      send({ event: 'command', func: 'pauseVideo', args: [] });
+      if (nativePlaying()) window.Dinosour.pauseVideo?.();
+      else send({ event: 'command', func: 'pauseVideo', args: [] });
     },
     stop() {
       pausedByUser = true;
@@ -1545,7 +1563,8 @@ export function mountRemoteWatch(root, id) {
       pausedAt = Date.now();
       playing = false;
       syncMedia(false);
-      send({ event: 'command', func: 'pauseVideo', args: [] });
+      if (nativePlaying()) window.Dinosour.pauseVideo?.();
+      else send({ event: 'command', func: 'pauseVideo', args: [] });
     },
     next() {
       if (destroyed) return;
@@ -1665,10 +1684,11 @@ export function mountRemoteWatch(root, id) {
     const clear = root.querySelector('[data-queue-clear]');
     const queue = store.queueList();
     // With no explicit queue, show similar videos as the suggested Up Next.
-    const shown = queue.length ? queue : relatedVideos.slice(0, 6);
+    const suggested = relatedVideos.filter((v) => v && !hiddenSuggested.has(v.id));
+    const shown = queue.length ? queue : suggested.slice(0, 6);
     if (list) list.innerHTML = shown.map(queueItemHtml).join('');
     if (empty) empty.hidden = shown.length > 0;
-    if (clear) clear.hidden = queue.length === 0;
+    if (clear) clear.hidden = shown.length === 0;
     if (store.accountFilter()) topUpAccountQueue();
   };
 
@@ -1689,17 +1709,18 @@ export function mountRemoteWatch(root, id) {
       // Only queued videos from this account advance automatically; the
       // related rail is still shown in full for the video the user clicked.
       const pool = store.isShuffle()
-        ? store.queueList().filter(accountMatches).sort(() => Math.random() - 0.5)
+        ? shuffleArray(store.queueList().filter(accountMatches))
         : store.queueList().filter(accountMatches);
       return pool[0] || null;
     }
+    const suggested = relatedVideos.filter((v) => v && !hiddenSuggested.has(v.id));
     if (store.isShuffle()) {
       const pool = store.queueList();
       if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
-      if (relatedVideos.length) return relatedVideos[Math.floor(Math.random() * relatedVideos.length)] || null;
+      if (suggested.length) return suggested[Math.floor(Math.random() * suggested.length)] || null;
       return null;
     }
-    return store.queueList()[0] || relatedVideos[0] || null;
+    return store.queueList()[0] || suggested[0] || null;
   };
 
   const hideEndCard = () => {
@@ -1785,6 +1806,11 @@ export function mountRemoteWatch(root, id) {
     const replayBtn = endCard.querySelector('[data-end-act="replay"]');
     const prevBtn = endCard.querySelector('[data-end-act="prev"]');
     const next = nextUp();
+    endNext = next;
+    // Repeat-one and "nothing left" branches do not repaint this row; clear it
+    // here so thumbnails from a previous end card never linger.
+    const alsoElEarly = endCard.querySelector('[data-end-related]');
+    if (alsoElEarly) alsoElEarly.innerHTML = '';
 
     // Repeat one: show this video as "up next" and replay when the countdown
     // finishes, instead of moving to another video.
@@ -1821,7 +1847,7 @@ export function mountRemoteWatch(root, id) {
 
     // "Also next": whatever is queued, then the related rail, without repeats.
     const also = [...store.queueList(), ...relatedVideos]
-      .filter((v) => v.id !== id && v.id !== next?.id)
+      .filter((v) => v.id !== id && v.id !== next?.id && !hiddenSuggested.has(v.id))
       .filter((v, i, all) => all.findIndex((x) => x.id === v.id) === i)
       .slice(0, 3);
     const alsoEl = endCard.querySelector('[data-end-related]');
@@ -2058,6 +2084,9 @@ export function mountRemoteWatch(root, id) {
       playerEl.classList.add('playing');
       started = true;
       remember();
+      // The native media session needs this to publish the title and expose
+      // lock-screen controls for the primary (ExoPlayer) playback path.
+      syncMedia(true);
       try {
         window.Dinosour.playVideo(id);
       } catch {
@@ -2116,6 +2145,11 @@ export function mountRemoteWatch(root, id) {
         });
       }
       tracks = dedupeTracks(tracks, seed.title, 20, 1, seed);
+      if (!tracks.length) {
+        toast('Could not build a mix right now. Check your connection.');
+        button?.removeAttribute('disabled');
+        return;
+      }
       store.saveMix({ id, seed, tracks, topic });
       toast(`Mix created from ${tracks.length} songs`);
       navigate(`/mix/${encodeURIComponent(id)}`);
@@ -2147,7 +2181,11 @@ export function mountRemoteWatch(root, id) {
 
     const remove = event.target.closest('[data-queue-remove]');
     if (remove) {
-      store.removeFromQueue(remove.dataset.queueRemove);
+      const removedId = remove.dataset.queueRemove;
+      store.removeFromQueue(removedId);
+      // Always hide it from the suggested fallback too, otherwise removing a
+      // queued copy immediately re-exposes the same video as a suggestion.
+      hiddenSuggested.add(removedId);
       paintQueue();
       toast('Removed from Up Next');
       return;
@@ -2155,6 +2193,7 @@ export function mountRemoteWatch(root, id) {
 
     if (event.target.closest('[data-queue-clear]')) {
       store.clearQueue();
+      for (const v of relatedVideos) if (v?.id) hiddenSuggested.add(v.id);
       paintQueue();
       toast('Up Next cleared');
     }
@@ -2167,6 +2206,9 @@ export function mountRemoteWatch(root, id) {
     store.set('autoplay', on);
     button.setAttribute('aria-pressed', String(on));
     button.querySelector('.switch')?.classList.toggle('on', on);
+    // A running countdown must stop/resume immediately when the toggle changes.
+    if (!on) hideEndCard();
+    else if (endVisible) showEndCard();
     toast(on ? 'Autoplay on' : 'Autoplay off');
   });
 
@@ -2174,6 +2216,7 @@ export function mountRemoteWatch(root, id) {
     const mode = store.cycleRepeat();
     const label = root.querySelector('[data-yt-repeat-label]');
     if (label) label.textContent = { off: 'Off', one: 'One', all: 'All' }[mode];
+    if (endVisible) showEndCard();
     toast({ off: 'Repeat off', one: 'Repeat this video', all: 'Repeat the queue' }[mode]);
   });
 
@@ -2187,7 +2230,7 @@ export function mountRemoteWatch(root, id) {
   endCard?.addEventListener('click', (event) => {
     const act = event.target.closest('[data-end-act]')?.dataset.endAct;
     if (act === 'prev') playPrevious();
-    else if (act === 'play') playNext();
+    else if (act === 'play') playNext(endNext);
     else if (act === 'replay') replay();
     else if (act === 'cancel') {
       endSuppressed = true;
@@ -2268,6 +2311,10 @@ export function mountRemoteWatch(root, id) {
         label: rate === 1 ? 'Normal (1×)' : `${rate}×`,
         checked: current === rate,
         onClick: () => {
+          if (nativePlaying()) {
+            toast('Playback speed is not available in the native player.');
+            return;
+          }
           store.set('ytRate', rate);
           paintPrefs();
           send({ event: 'command', func: 'setPlaybackRate', args: [rate] });
@@ -2290,6 +2337,10 @@ export function mountRemoteWatch(root, id) {
         label: value === 'auto' ? 'Auto (recommended)' : label,
         checked: currentQuality() === value,
         onClick: () => {
+          if (nativePlaying()) {
+            toast('Quality is controlled by the native player.');
+            return;
+          }
           store.set('ytQuality', value);
           paintPrefs();
           send({
@@ -2696,7 +2747,7 @@ export function mountLibrary(root, kind, playlistId = '') {
     ]);
   });
 
-  root.addEventListener('click', (event) => {
+  const onClick = (event) => {
     const ytHistory = event.target.closest('[data-remove-yt-history]');
     if (ytHistory) {
       event.preventDefault();
@@ -2750,7 +2801,12 @@ export function mountLibrary(root, kind, playlistId = '') {
       toast('Removed from playlist');
       rerender();
     }
-  });
+  };
+  // #view is reused by the router; without cleanup every library visit stacks
+  // another click handler, so one removal fires N times.
+  if (root.__feedCleanup) root.__feedCleanup();
+  root.__feedCleanup = () => root.removeEventListener('click', onClick);
+  root.addEventListener('click', onClick);
 
   void kind;
   void playlistId;
@@ -2771,6 +2827,7 @@ const TREND_PERIOD_DAYS = { today: 1, week: 7, month: 31, all: Infinity };
 function publishedAgeDays(label) {
   const s = String(label || '').toLowerCase();
   if (!s || s.includes('premier')) return null;
+  if (/\b(just now|now)\b/.test(s)) return 0;
   const n = Number(s.match(/[\d,.]+/)?.[0]?.replace(/,/g, '')) || 0;
   if (/\b(second|minute|hour)\b/.test(s)) return 0;
   if (/\bday\b/.test(s)) return n;

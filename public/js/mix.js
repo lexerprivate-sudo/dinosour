@@ -196,9 +196,19 @@ function songScore(video) {
   if (seconds >= 90 && seconds <= 360) score -= 2;
   else if (seconds) score -= 1;
   if (/\s[-–—]\s/.test(String(video.title || ''))) score -= 1;
-  if (SONG_MARKER_RE.test(String(video.title || ''))) score -= 1;
-  if (/\b(cover|acoustic|stripped|unplugged|piano|ballad)\b/i.test(String(video.title || ''))) score -= 1;
+  if (/\b(lyrics?|audio|official|visualizer)\b/i.test(String(video.title || ''))) score -= 1;
   return score;
+}
+
+function isCover(title) {
+  return /\b(cover|tribute)\b/i.test(String(title || ''));
+}
+
+/** Small ranking boost for mellow/stripped/lyric-led tracks. */
+const VIBE_WORDS = /\b(acoustic|ballad|mellow|slow|soft|sad|indie|stripped|piano|chill|calm|gentle|lyrics?)\b/i;
+function vibeScore(video) {
+  const matches = String(video?.title || '').match(new RegExp(VIBE_WORDS.source, 'gi'));
+  return Math.min(2, matches ? matches.length : 0);
 }
 
 function moodsFrom(text) {
@@ -255,11 +265,12 @@ export function isSameArtist(video, seed) {
  * Remove duplicate uploads, keep one track per performing artist, drop
  * compilations, and (when a seed is given) keep the seed artist out entirely.
  */
-export function dedupeTracks(videos, seedTitle = '', limit = 12, perArtist = 2, seed = null) {
+export function dedupeTracks(videos, seedTitle = '', limit = 12, perArtist = 2, seed = null, coverCap = Infinity) {
   const out = [];
   const artists = new Map();
   const channels = new Map();
   const usedHeads = new Set();
+  let covers = 0;
   const seedTrack = seedTitle ? artistAndTrack(seedTitle).track : '';
   const seedHead = seedTrack ? [...songHeads(seedTrack)][0] || '' : '';
   const channelLimit = Math.max(3, perArtist * 3);
@@ -272,6 +283,8 @@ export function dedupeTracks(videos, seedTitle = '', limit = 12, perArtist = 2, 
     if ([...heads].some((h) => usedHeads.has(h))) continue;
     if (seed && isSameArtist(v, seed)) continue;
     if (out.some((keep) => isSameSong(keep.title, v.title))) continue;
+    const cover = isCover(v.title);
+    if (cover && covers >= coverCap) continue;
     const artist = artistOf(v);
     if (artist && (artists.get(artist) || 0) >= perArtist) continue;
     const channel = normName(v.channel || '');
@@ -279,6 +292,7 @@ export function dedupeTracks(videos, seedTitle = '', limit = 12, perArtist = 2, 
     if (artist) artists.set(artist, (artists.get(artist) || 0) + 1);
     channels.set(channel, (channels.get(channel) || 0) + 1);
     for (const h of heads) usedHeads.add(h);
+    if (cover) covers++;
     out.push(v);
     if (out.length >= limit) break;
   }
@@ -321,7 +335,7 @@ export async function buildMix(seed, search, { count = 12, topic = '' } = {}) {
   const seedText = `${title} ${topic} ${keywords.join(' ')} ${(info?.description || '').slice(0, 500)}`;
   const genres = [...new Set(inferGenres(`${hint} ${seedText}`))].slice(0, 3);
   let moods = [...new Set(moodsFrom(seedText))].slice(0, 3);
-  if (!moods.length) moods = ['acoustic', 'mellow'];
+  if (!moods.length) moods = ['sad', 'indie'];
 
   const vibe = withoutArtist(topic, artist, seed?.channel);
   const vibeTerms = vibe
@@ -339,30 +353,33 @@ export async function buildMix(seed, search, { count = 12, topic = '' } = {}) {
     if (q && !queries.includes(q)) queries.push(q);
   };
 
-  // Track covers are the strongest source of single songs by *other* artists
-  // with a closely matching feel.
-  if (track) {
-    add(`${track} acoustic cover`);
-    add(`${track} cover`);
-    add(`songs like ${track} acoustic`);
-  }
-  for (const mood of moods.slice(0, 2)) {
-    add(`${mood} acoustic cover`);
-    if (genres.length) add(`${mood} ${genres[0]} songs`);
-  }
+  // Real songs by other artists: mood + genre searches that YouTube answers
+  // with single tracks (lyric videos, official videos) rather than playlists.
+  // Covers are deliberately a small garnish, never the whole queue.
   for (const genre of genres) {
     add(`${genre} songs`);
     add(`indie ${genre} songs`);
+    add(`${genre} songs lyric video`);
   }
-  for (const term of vibeTerms) {
-    add(`${term} songs`);
-    add(`${term} cover`);
+  for (const mood of moods.slice(0, 2)) {
+    if (genres.length) add(`${mood} ${genres[0]} songs`);
+    add(`${mood} indie songs`);
+    add(`${mood} songs lyric video`);
   }
-  for (const keyword of cleanKeywords.slice(0, 2)) add(`${keyword} cover`);
-  if (track) add(`${track} cover versions by other artists`);
+  add('singer songwriter songs');
+  add('female indie songs');
+  add('acoustic indie songs');
+  add('indie pop songs');
+  for (const term of vibeTerms) add(`${term} songs`);
+  for (const keyword of cleanKeywords.slice(0, 2)) add(`${keyword} songs`);
+
+  if (track) {
+    add(`${track} acoustic cover`);
+    add(`${track} cover`);
+  }
   if (!queries.length) {
     add('indie pop songs');
-    add('acoustic cover songs');
+    add('sad indie songs');
   }
 
   const settled = await Promise.allSettled(queries.map((q) => search(q)));
@@ -371,6 +388,8 @@ export async function buildMix(seed, search, { count = 12, topic = '' } = {}) {
     if (result.status !== 'fulfilled') continue;
     for (const v of (result.value?.videos || [])) pool.push(v);
   }
-  pool.sort((a, b) => songScore(a) - songScore(b));
-  return dedupeTracks(pool, title, count, 1, seed);
+  pool.sort(
+    (a, b) => songScore(a) - vibeScore(a) - (songScore(b) - vibeScore(b))
+  );
+  return dedupeTracks(pool, title, count, 1, seed, Math.max(2, Math.floor(count / 5)));
 }

@@ -88,6 +88,8 @@ const NAV = [
   { key: 'liked', href: '/feed/liked', label: 'Liked videos', icon: 'thumb-up' },
   { key: 'playlists', href: '/feed/playlists', label: 'Playlists', icon: 'music' },
   { key: 'mixes', href: '/feed/mixes', label: 'Music mixes', icon: 'shuffle' },
+  { divider: true },
+  { key: 'settings', href: '/settings', label: 'Settings', icon: 'sliders' },
 ];
 
 function buildSidebar() {
@@ -195,6 +197,7 @@ function localSuggestionRows(q) {
 }
 
 function showSuggestions() {
+  suggestionToken += 1;
   const q = searchInput.value.trim();
   searchClear.hidden = !q;
   if (!q) {
@@ -207,7 +210,6 @@ function showSuggestions() {
     return;
   }
 
-  suggestionToken += 1;
   const localRows = APP_MODE ? localSuggestionRows(q) : [];
   paintSuggestions(localRows);
   // paintSuggestions() hides and bumps the token when there are no rows yet.
@@ -1059,8 +1061,8 @@ function renderRoute() {
     // by taking the first valid YouTube id from the segment.
     const recovered = String(seg[2] || '').match(/^[A-Za-z0-9_-]{11}/)?.[0];
     if (recovered && recovered !== seg[2]) {
-      const query = url.search.toString();
-      history.replaceState(history.state, '', `/watch/yt/${recovered}${query ? `?${query}` : ''}`);
+      const suffix = `${url.search}${url.hash}`;
+      history.replaceState(history.state, '', `/watch/yt/${recovered}${suffix}`);
     }
     const id = recovered || '';
     if (/^[\w-]{11}$/.test(id)) {
@@ -1134,7 +1136,12 @@ function renderRoute() {
     };
     title = category === 'All' ? 'Trending' : `${category} — Trending`;
   } else if (seg[0] === 'channel' && seg[1] && url.searchParams.get('yt') === '1') {
-    const id = decodeURIComponent(seg[1]);
+    let id = seg[1];
+    try {
+      id = decodeURIComponent(seg[1]);
+    } catch {
+      /* malformed escape — keep the raw segment */
+    }
     const name = url.searchParams.get('name') || id;
     html = renderAccount({ id, name });
     mount = () => {
@@ -1223,6 +1230,7 @@ boot().catch((err) => {
     <div class="empty-icon">${icon('film')}</div>
     <h2>The catalog could not be loaded</h2>
     <p>${esc(err.message || 'Unknown error')}. Make sure the local server is running and the <code>data/catalog.json</code> file exists.</p>
-    <a class="btn-primary" href="/" data-link>Try again</a>
+    <button class="btn-primary" type="button" data-boot-retry>Try again</button>
   </div></div>`;
+  view.querySelector('[data-boot-retry]')?.addEventListener('click', () => location.reload());
 });
