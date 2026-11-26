@@ -48,9 +48,28 @@ const ARTIST_GENRES = {
   postmalone: 'hip hop pop', morganwallen: 'country', lukecombs: 'country',
   zacbryan: 'country', carrieunderwood: 'country', keithurban: 'country',
   bonjovi: 'rock', queen: 'rock', nirvana: 'rock', metallica: 'metal rock',
-  acdc: 'rock', linkingpark: 'rock', coldplay: 'rock pop', radiohead: 'indie rock',
+  acdc: 'rock', linkinpark: 'rock', coldplay: 'rock pop', radiohead: 'indie rock',
   thebeatles: 'rock', elvispresley: 'rock', michaeljackson: 'pop soul',
 };
+
+/* Language markers. YouTube returns whatever language dominates the user's
+ * region for generic queries; these let us keep a mix in the SEED's language
+ * instead of drifting into Tagalog/OPM (or any other language) songs. */
+const TAGALOG_RE = /\b(opm|tagalog|pilipino|filipino|pinoy|kundiman|tiktok)\b/i;
+const LANGUAGE_HINTS = {
+  tagalog: TAGALOG_RE,
+  spanish: /\b(español|spanish|latina?|latin pop|reggaeton|corrido|bachata)\b/i,
+  korean: /\b(k-pop|korean)\b/i,
+  japanese: /\b(j-pop|japanese)\b/i,
+};
+
+function languageOf(video) {
+  const text = `${video?.title || ''} ${video?.channel || ''}`;
+  for (const [name, re] of Object.entries(LANGUAGE_HINTS)) {
+    if (re.test(text)) return name;
+  }
+  return 'english';
+}
 
 export function cleanTitle(title = '') {
   return String(title || '')
@@ -237,10 +256,10 @@ export function isSameArtist(video, seed) {
   const title = String(video?.title || '');
   const channel = String(video?.channel || '');
   const parts = title.split(/\s+[-–—]\s+/);
-  const sides = parts.length > 1 ? [parts[0], parts[parts.length - 1]] : [channel];
 
   const matches = (value) => {
     const n = normName(value);
+    if (!n) return false;
     return names.some(
       (name) =>
         n === name ||
@@ -249,15 +268,21 @@ export function isSameArtist(video, seed) {
     );
   };
 
+  // ALWAYS check the uploader channel. Lyric/topic channels and the artist's
+  // own channel must be excluded even when the title has dashes — that is the
+  // main cause of a queue filling up with one artist.
+  if (matches(channel)) return true;
   // "Artist - Track" or "Track - Artist": check both ends. A trailing mention
   // of the seed artist is ignored when the title says it is a cover/tribute.
-  for (let i = 0; i < sides.length; i++) {
-    if (i === 1 && /\b(cover|tribute|remix|karaoke|version)\b/i.test(parts[parts.length - 1])) continue;
-    if (matches(sides[i])) return true;
+  for (let i = 0; i < parts.length; i++) {
+    if (i === parts.length - 1 && /\b(cover|tribute|remix|karaoke|version)\b/i.test(parts[i])) continue;
+    if (matches(parts[i])) return true;
   }
-  // "Taylor Swift being the MAIN CHARACTER..." has no dash but starts with
-  // the artist name — it is about the artist, not a different performer.
-  if (parts.length === 1 && names.some((name) => normName(title).startsWith(name))) return true;
+  // No dash: "Taylor Swift being the MAIN CHARACTER…" or "…(Artist Lyrics)".
+  const flat = normName(title);
+  if (names.some((name) => flat.startsWith(name) || (name.length > 3 && flat.includes(name)))) {
+    return true;
+  }
   return false;
 }
 
@@ -267,6 +292,7 @@ export function isSameArtist(video, seed) {
  */
 export function dedupeTracks(videos, seedTitle = '', limit = 12, perArtist = 2, seed = null, coverCap = Infinity) {
   const out = [];
+  const seedLanguage = seed ? languageOf(seed) : 'english';
   const artists = new Map();
   const channels = new Map();
   const usedHeads = new Set();
@@ -277,6 +303,10 @@ export function dedupeTracks(videos, seedTitle = '', limit = 12, perArtist = 2, 
   for (const v of videos || []) {
     if (!v || !v.id) continue;
     if (!isSingleSong(v)) continue;
+    // Keep the mix in the seed's language. A Taylor Swift mix must not drift
+    // into Tagalog/OPM uploads just because YouTube's regional search favours
+    // them; a Tagalog seed keeps Tagalog songs.
+    if (languageOf(v) !== seedLanguage) continue;
     const heads = songHeads(v.title);
     if (seedTitle && isSameSong(v.title, seedTitle)) continue;
     if (seedHead && heads.has(seedHead)) continue;
@@ -348,6 +378,10 @@ export async function buildMix(seed, search, { count = 12, topic = '' } = {}) {
     .slice(0, 4);
 
   const queries = [];
+  // When the seed is English, explicitly ask for English songs. YouTube's
+  // regional search otherwise fills generic queries ("indie pop songs") with
+  // whatever language dominates the user's region — e.g. Tagalog/OPM.
+  const languageHint = languageOf(seed) === 'english' ? 'english' : languageOf(seed);
   const add = (value) => {
     const q = String(value || '').replace(/\s+/g, ' ').trim().slice(0, 180);
     if (q && !queries.includes(q)) queries.push(q);
@@ -357,29 +391,29 @@ export async function buildMix(seed, search, { count = 12, topic = '' } = {}) {
   // with single tracks (lyric videos, official videos) rather than playlists.
   // Covers are deliberately a small garnish, never the whole queue.
   for (const genre of genres) {
-    add(`${genre} songs`);
-    add(`indie ${genre} songs`);
-    add(`${genre} songs lyric video`);
+    add(`${languageHint} ${genre} songs`);
+    add(`${languageHint} indie ${genre} songs`);
+    add(`${languageHint} ${genre} songs lyric video`);
   }
   for (const mood of moods.slice(0, 2)) {
-    if (genres.length) add(`${mood} ${genres[0]} songs`);
-    add(`${mood} indie songs`);
-    add(`${mood} songs lyric video`);
+    if (genres.length) add(`${languageHint} ${mood} ${genres[0]} songs`);
+    add(`${languageHint} ${mood} indie songs`);
+    add(`${languageHint} ${mood} songs lyric video`);
   }
-  add('singer songwriter songs');
-  add('female indie songs');
-  add('acoustic indie songs');
-  add('indie pop songs');
-  for (const term of vibeTerms) add(`${term} songs`);
+  add(`${languageHint} singer songwriter songs`);
+  add(`${languageHint} female indie songs`);
+  add(`${languageHint} acoustic indie songs`);
+  add(`${languageHint} indie pop songs`);
+  for (const term of vibeTerms) add(`${languageHint} ${term} songs`);
   for (const keyword of cleanKeywords.slice(0, 2)) add(`${keyword} songs`);
 
-  if (track) {
+  if (track && languageOf(seed) !== 'english') {
     add(`${track} acoustic cover`);
     add(`${track} cover`);
   }
   if (!queries.length) {
-    add('indie pop songs');
-    add('sad indie songs');
+    add(`${languageHint} indie pop songs`);
+    add(`${languageHint} sad indie songs`);
   }
 
   const settled = await Promise.allSettled(queries.map((q) => search(q)));

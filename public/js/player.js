@@ -337,6 +337,7 @@ export class Player {
       this.progress.classList.remove('dragging');
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
       this.media.currentTime = this.ratioFromEvent(ev) * this.media.duration;
       this.paintTime();
       this.saveProgress();
@@ -344,6 +345,7 @@ export class Player {
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up, { once: true });
+    window.addEventListener('pointercancel', up, { once: true });
     this.media.currentTime = this.ratioFromEvent(e) * this.media.duration;
     this.paintTime();
   }
@@ -558,6 +560,8 @@ export class Player {
   handleKey(e) {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
     if (isTypingTarget(e.target)) return;
+    // Don't hijack Space on a focused button/link/slider — let it activate.
+    if (e.target?.closest?.('button, a, [role="slider"], input, select')) return;
     const key = e.key;
     if (key === ' ' || key.toLowerCase() === 'k') {
       e.preventDefault();

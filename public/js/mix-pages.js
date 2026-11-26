@@ -170,7 +170,7 @@ export function mountMix(root, id) {
     }
   });
 
-  root.addEventListener('click', (event) => {
+  const onClick = (event) => {
     const add = event.target.closest('[data-add-queue]');
     if (!add) return;
     const added = store.addToQueue({
@@ -181,7 +181,10 @@ export function mountMix(root, id) {
       length: add.dataset.qLength,
     });
     toast(added ? 'Added to Up Next' : 'Already in Up Next');
-  });
+  };
+  if (root.__feedCleanup) root.__feedCleanup();
+  root.__feedCleanup = () => root.removeEventListener('click', onClick);
+  root.addEventListener('click', onClick);
 
   // A mix opened from a copied link has a seed but no tracks yet.
   if (!(store.mixById(id)?.tracks || []).length) rebuild(null);

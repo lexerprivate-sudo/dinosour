@@ -1110,7 +1110,7 @@ export async function mountResults(root, query, sort = 'relevance') {
   if (sentinel) {
     observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting) && more.hidden) load(true);
+        if (entries.some((e) => e.isIntersecting)) maybeMore();
       },
       { rootMargin: '900px 0px' }
     );
@@ -1118,9 +1118,11 @@ export async function mountResults(root, query, sort = 'relevance') {
   }
 
   const onScroll = () => maybeMore();
+  window.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', onScroll, { passive: true });
   root.__feedCleanup = () => {
     observer?.disconnect();
+    window.removeEventListener('scroll', onScroll);
     window.removeEventListener('resize', onScroll);
   };
 
@@ -1134,6 +1136,14 @@ export async function mountResults(root, query, sort = 'relevance') {
       });
       applyView();
       paintCount();
+      // Persist the choice so reloads and shared links keep the same order.
+      try {
+        const url = new URL(location.href);
+        url.searchParams.set('sort', order);
+        history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+      } catch {
+        /* history may be unavailable */
+      }
     });
   });
 
@@ -1486,6 +1496,11 @@ export function mountRemoteWatch(root, id) {
   let lastNudge = 0;
   let keepAliveTimer = null;
   let lastPlayerState = null;
+  // Hidden tabs throttle/throttle the embed so its "ended" (state 0) message
+  // never arrives. A wall-clock watchdog advances on time instead, so music
+  // keeps playing to the next song even when the video is not on screen.
+  let endWatchdog = null;
+  let expectedEndAt = 0;
 
   const endCard = playerEl?.querySelector('[data-yt-end]');
   store.pushWatchTrail(id);
@@ -1604,6 +1619,10 @@ export function mountRemoteWatch(root, id) {
     wantPlaying = true;
     lastAdvance = Date.now();
     lastNudge = 0;
+    if (duration) {
+      expectedEndAt = Date.now() + Math.max(1000, (duration - position) * 1000);
+      armEndWatchdog();
+    }
     if (!keepAliveTimer) keepAliveTimer = setInterval(nudgePlayback, 2000);
     send({ event: 'command', func: 'playVideo', args: [] });
   };
@@ -1790,8 +1809,17 @@ export function mountRemoteWatch(root, id) {
     send({ event: 'command', func: 'playVideo', args: [] });
   };
 
-  const showEndCard = () => {
-    if (!endCard || destroyed || endVisible || endSuppressed) return;
+  const showEndCard = (force = false) => {
+    if (!endCard || destroyed) return;
+    // Settings can change while the card is visible; rebuild it instead of
+    // early-returning so a stale countdown/next target is never left running.
+    if (force) {
+      clearInterval(endTimer);
+      endTimer = null;
+      endVisible = false;
+      endSuppressed = false;
+    }
+    if (endVisible || endSuppressed) return;
     endVisible = true;
     endCard.classList.add('visible');
 
@@ -1947,6 +1975,10 @@ export function mountRemoteWatch(root, id) {
       position = info.currentTime;
       // Don't wait for playerState: several videos omit it from infoDelivery.
       if (duration) {
+        // Refresh the hidden-tab end estimate from real playback progress.
+        if (wantPlaying && !pausedByUser) {
+          expectedEndAt = Date.now() + Math.max(1000, (duration - position) * 1000);
+        }
         maybeSeek();
         if (position >= duration - 2) store.removeResume(id);
         else if (position > 4) save();
@@ -1962,9 +1994,20 @@ export function mountRemoteWatch(root, id) {
       playing = true;
       wantPlaying = true;
       lastAdvance = Date.now();
+      if (isHidden() && duration) {
+        expectedEndAt = Date.now() + Math.max(1000, (duration - position) * 1000);
+        armEndWatchdog();
+      }
     } else if (state === 0 || state === 2) {
       playing = false;
-      if (state === 0) wantPlaying = false;
+      if (state === 0) {
+      wantPlaying = false;
+      expectedEndAt = 0;
+      if (endWatchdog) {
+        clearInterval(endWatchdog);
+        endWatchdog = null;
+      }
+    }
       else if (!isAppVisible()) {
         if (wantPlaying && !pausedByUser) lastAdvance = 0;
       } else {
@@ -1997,8 +2040,39 @@ export function mountRemoteWatch(root, id) {
     listenTimer = listenTries < 8 ? setTimeout(listen, 1200) : null;
   };
 
+  const isHidden = () => document.visibilityState === 'hidden' || !isAppVisible();
+
+  /* If the player stops reporting state while hidden, advance from the clock.
+     position/duration come from the last embed message, so expectedEndAt is
+     refreshed whenever the embed reports fresh time. */
+  const armEndWatchdog = () => {
+    if (endWatchdog) clearInterval(endWatchdog);
+    endWatchdog = setInterval(() => {
+      if (destroyed || endSuppressed || pausedByUser || !wantPlaying) return;
+      if (!expectedEndAt || Date.now() < expectedEndAt) return;
+      if (!isHidden()) return; // foreground relies on the normal end card
+      if (store.repeatMode() === 'one') {
+        replay();
+        return;
+      }
+      const next = nextUp();
+      if (next) playNext(next);
+      else expectedEndAt = 0;
+    }, 1000);
+  };
+
   const onHide = () => {
-    if (document.visibilityState === 'hidden') save(true);
+    if (document.visibilityState === 'hidden') {
+      save(true);
+      if (wantPlaying && !pausedByUser && duration) {
+        expectedEndAt = Date.now() + Math.max(1000, (duration - position) * 1000);
+        armEndWatchdog();
+      }
+    } else if (endWatchdog) {
+      clearInterval(endWatchdog);
+      endWatchdog = null;
+      expectedEndAt = 0;
+    }
   };
 
   const onPageHide = () => save(true);
@@ -2018,6 +2092,7 @@ export function mountRemoteWatch(root, id) {
     clearTimeout(listenTimer);
     clearTimeout(seekTimer);
     clearInterval(endTimer);
+    if (endWatchdog) clearInterval(endWatchdog);
     clearSleepTimer();
     if (store.state.sleepTimer) store.set('sleepTimer', 0);
     clearInterval(keepAliveTimer);
@@ -2081,6 +2156,9 @@ export function mountRemoteWatch(root, id) {
     // background playback actually works.
     if (APP_MODE && window.Dinosour?.playVideo) {
       playerEl.replaceChildren();
+      // replaceChildren() detaches the end screen; keep it mounted so native
+      // playback still gets the end card and autoplay.
+      if (endCard) playerEl.append(endCard);
       playerEl.classList.add('playing');
       started = true;
       remember();
@@ -2208,7 +2286,7 @@ export function mountRemoteWatch(root, id) {
     button.querySelector('.switch')?.classList.toggle('on', on);
     // A running countdown must stop/resume immediately when the toggle changes.
     if (!on) hideEndCard();
-    else if (endVisible) showEndCard();
+    else if (endVisible || endSuppressed) showEndCard(true);
     toast(on ? 'Autoplay on' : 'Autoplay off');
   });
 
@@ -2216,7 +2294,7 @@ export function mountRemoteWatch(root, id) {
     const mode = store.cycleRepeat();
     const label = root.querySelector('[data-yt-repeat-label]');
     if (label) label.textContent = { off: 'Off', one: 'One', all: 'All' }[mode];
-    if (endVisible) showEndCard();
+    if (endVisible) showEndCard(true);
     toast({ off: 'Repeat off', one: 'Repeat this video', all: 'Repeat the queue' }[mode]);
   });
 

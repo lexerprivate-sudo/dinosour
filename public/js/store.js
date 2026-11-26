@@ -364,7 +364,7 @@ export const store = {
 
   recentSearches() {
     return Array.isArray(this.state.searchHistory)
-      ? this.state.searchHistory.filter((s) => typeof s === 'string' && s).slice(0, 10)
+      ? this.state.searchHistory.filter((s) => typeof s === 'string' && s).slice(0, 12)
       : [];
   },
 
@@ -777,7 +777,9 @@ export const store = {
       seed: { ...mix.seed, id },
       tracks: Array.isArray(mix.tracks) ? mix.tracks.slice(0, 30) : [],
       topic: String(mix.topic || '').slice(0, 200),
-      createdAt: Date.now(),
+      // Refreshing a mix must not reset its creation time or bump it in the
+      // library on every rebuild.
+      createdAt: Number(this.mixById(id)?.createdAt) || Date.now(),
     };
     const rest = this.recentMixes().filter((m) => m.id !== entry.id);
     this.state.mixes = [entry, ...rest].slice(0, 8);

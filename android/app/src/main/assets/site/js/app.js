@@ -184,7 +184,12 @@ function paintSuggestions(rows) {
     )
     .join('');
   suggestions.hidden = false;
-  activeIndex = -1;
+  // Keep the keyboard highlight across async repaints (e.g. when YouTube
+  // suggestions arrive after the local ones) instead of dropping the cursor.
+  if (activeIndex >= rows.length) activeIndex = -1;
+  if (activeIndex >= 0) {
+    $$('.suggestion', suggestions).forEach((el, i) => el.classList.toggle('active', i === activeIndex));
+  }
 }
 
 function localSuggestionRows(q) {
@@ -257,8 +262,18 @@ function moveSuggestion(delta) {
   $('.suggestion.active', suggestions)?.scrollIntoView({ block: 'nearest' });
 }
 
-searchInput.addEventListener('input', debounce(showSuggestions, 70));
-searchInput.addEventListener('focus', () => showSuggestions());
+const debouncedSuggestions = debounce(showSuggestions, 70);
+searchInput.addEventListener('input', () => {
+  // Reset the highlight synchronously: Enter before the debounce fires would
+  // otherwise activate a suggestion from the previous query.
+  activeIndex = -1;
+  debouncedSuggestions();
+});
+let suppressFocusSuggestions = false;
+searchInput.addEventListener('focus', () => {
+  if (suppressFocusSuggestions) return;
+  showSuggestions();
+});
 searchInput.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') {
     e.preventDefault();
@@ -281,7 +296,9 @@ searchForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const q = searchInput.value.trim();
   if (!q) {
+    suppressFocusSuggestions = true;
     searchInput.focus();
+    suppressFocusSuggestions = false;
     return;
   }
   store.addSearch(q);
@@ -294,7 +311,9 @@ searchClear.addEventListener('click', () => {
   searchInput.value = '';
   searchClear.hidden = true;
   hideSuggestions();
+  suppressFocusSuggestions = true;
   searchInput.focus();
+  suppressFocusSuggestions = false;
 });
 
 suggestions.addEventListener('pointerdown', (e) => {
@@ -1092,9 +1111,10 @@ function renderRoute() {
     }
   } else if (seg[0] === 'results') {
     const q = url.searchParams.get('search_query') || '';
-    html = renderResults({ query: q });
+    const sort = url.searchParams.get('sort') || 'relevance';
+    html = renderResults({ query: q, sort });
     mount = () => {
-      mountResults(view, q);
+      mountResults(view, q, sort);
     };
     title = q ? `${q}` : 'Search';
     if (document.activeElement !== searchInput) {
