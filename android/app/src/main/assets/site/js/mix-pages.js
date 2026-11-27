@@ -5,7 +5,7 @@ import { emptyState } from './components.js';
 import { esc, shuffleArray } from './util.js';
 import { navigate, toast } from './ui.js';
 import { searchYouTube } from './yt.js';
-import { buildMix } from './mix.js';
+import { buildMix, withSeedTrack } from './mix.js';
 
 const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
 
@@ -70,8 +70,10 @@ export function renderMix(id) {
       actionText: 'Browse home',
     })}</div>`;
   }
-  const tracks = mix.tracks || [];
   const seed = mix.seed || {};
+  // Always include the seed song itself as the first track, even for mixes
+  // saved before this behaviour was added.
+  const tracks = withSeedTrack(mix.tracks || [], seed);
   return `<div class="page mix-page" data-mix-root data-mix-id="${esc(id)}">
     <div class="page-head">
       <a class="icon-btn" href="/feed/mixes" data-link aria-label="Back to mixes">${icon('arrow-left')}</a>
@@ -83,7 +85,7 @@ export function renderMix(id) {
       <div class="mix-hero-text">
         <span class="mix-kicker">${icon('spark')} Auto-generated mix</span>
         <h2>Based on ${esc(seed.title || 'your music')}</h2>
-        <p class="mix-meta">${tracks.length} similar songs · from ${esc(seed.channel || 'YouTube')}</p>
+        <p class="mix-meta">${tracks.length} songs · from ${esc(seed.channel || 'YouTube')}</p>
         <div class="mix-actions">
           <button type="button" class="btn-primary" data-mix-play ${tracks.length ? '' : 'disabled'}>${icon('play')} Play all</button>
           <button type="button" class="btn-outline" data-mix-shuffle ${tracks.length ? '' : 'disabled'}>${icon('shuffle')} Shuffle</button>
@@ -105,16 +107,17 @@ export function mountMix(root, id) {
     const current = store.mixById(id);
     if (!current) return;
     const list = root.querySelector('[data-mix-list]');
+    const tracks = withSeedTrack(current.tracks || [], current.seed);
     if (list) {
-      list.innerHTML = (current.tracks || []).length
-        ? current.tracks.map(mixTrackHtml).join('')
+      list.innerHTML = tracks.length
+        ? tracks.map(mixTrackHtml).join('')
         : '<p class="related-empty">No tracks yet. Tap Refresh to rebuild this mix.</p>';
     }
     const meta = root.querySelector('.mix-meta');
-    if (meta) meta.textContent = `${(current.tracks || []).length} similar songs · from ${current.seed?.channel || 'YouTube'}`;
+    if (meta) meta.textContent = `${tracks.length} songs · from ${current.seed?.channel || 'YouTube'}`;
     // A mix opened from a shared link starts with no tracks, so Play all and
     // Shuffle are rendered disabled; enable them once Refresh fills the list.
-    const hasTracks = (current.tracks || []).length > 0;
+    const hasTracks = tracks.length > 0;
     for (const selector of ['[data-mix-play]', '[data-mix-shuffle]']) {
       const button = root.querySelector(selector);
       if (button) button.disabled = !hasTracks;
@@ -122,7 +125,8 @@ export function mountMix(root, id) {
   };
 
   const play = (shuffle) => {
-    const saved = [...(store.mixById(id)?.tracks || [])];
+    const mix = store.mixById(id);
+    const saved = withSeedTrack(mix?.tracks || [], mix?.seed);
     if (!saved.length) return;
     const tracks = shuffle ? shuffleArray(saved) : saved;
     const [first, ...rest] = tracks;
@@ -135,10 +139,13 @@ export function mountMix(root, id) {
     if (button) button.disabled = true;
     try {
       const current = store.mixById(id);
-      const tracks = await buildMix(current.seed, searchYouTube, {
-        count: 20,
-        topic: current.topic || '',
-      });
+      const tracks = withSeedTrack(
+        await buildMix(current.seed, searchYouTube, {
+          count: 20,
+          topic: current.topic || '',
+        }),
+        current.seed
+      );
       store.saveMix({ id, seed: current.seed, topic: current.topic, tracks });
       paint();
       toast(`Refreshed ${tracks.length} songs`);

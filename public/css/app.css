@@ -1460,8 +1460,10 @@ input[type="range"].vol::-moz-range-thumb { width: 12px; height: 12px; border: 0
   color: var(--text-3); font-size: 12px; line-height: 1.5;
 }
 .up-next-empty .icon { width: 14px; height: 14px; }
-.up-next-clear { display: block; margin: 8px 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
-.up-next-clear:hover { color: var(--text); }
+.up-next-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.up-next-clear, .up-next-more { display: block; margin: 8px 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.up-next-clear:hover, .up-next-more:hover { color: var(--text); }
+.up-next-more { color: var(--accent, var(--text)); }
 
 .queue-item { display: flex; align-items: flex-start; border-radius: 10px; }
 .queue-item:hover { background: var(--hover); }

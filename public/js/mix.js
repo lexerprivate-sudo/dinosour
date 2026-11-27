@@ -329,6 +329,28 @@ export function dedupeTracks(videos, seedTitle = '', limit = 12, perArtist = 2, 
   return out;
 }
 
+/** A queue-track object for the seed video (the song the mix is based on). */
+export function mixSeedTrack(seed) {
+  if (!seed?.id) return null;
+  return {
+    id: seed.id,
+    title: seed.title || 'YouTube video',
+    channel: seed.channel || 'YouTube',
+    thumb: seed.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(seed.id)}/mqdefault.jpg`,
+    length: seed.length || '',
+  };
+}
+
+/** Put the seed song first in the mix so the playlist includes the song itself. */
+export function withSeedTrack(tracks, seed) {
+  const list = [...(tracks || [])];
+  const first = mixSeedTrack(seed);
+  if (!first) return list;
+  const at = list.findIndex((v) => v && v.id === first.id);
+  if (at >= 0) list.splice(at, 1);
+  return [first, ...list].slice(0, 31);
+}
+
 /** Remove the artist's own words from a search phrase, keeping the vibe. */
 export function withoutArtist(text, artist, channel = '') {
   let out = String(text || '');

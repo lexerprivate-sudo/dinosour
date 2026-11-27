@@ -24,7 +24,7 @@ import {
 import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, shuffleArray, timeAgo, APP_MODE } from './util.js';
 import { navigate, openMenu, openPrompt, toast } from './ui.js';
 import { searchYouTube, videoInfo } from './yt.js';
-import { buildMix, dedupeTracks } from './mix.js';
+import { buildMix, dedupeTracks, withSeedTrack } from './mix.js';
 import { clearMediaTarget, isAppVisible, reportMedia, setMediaTarget } from './media.js';
 
 const icon = (name, cls = '') =>
@@ -1357,7 +1357,10 @@ export function renderRemoteWatch(id, info = null) {
         </div>
         <div class="up-next-list" data-queue-list>${queue.map(queueItemHtml).join('')}</div>
         <p class="up-next-empty" data-queue-empty ${queue.length ? 'hidden' : ''}>Tap ${icon('plus')} on any video to line it up here.</p>
-        <button class="text-btn up-next-clear" type="button" data-queue-clear ${queue.length ? '' : 'hidden'}>Clear queue</button>
+        <div class="up-next-foot">
+          <button class="text-btn up-next-clear" type="button" data-queue-clear ${queue.length ? '' : 'hidden'}>Clear queue</button>
+          <button class="text-btn up-next-more" type="button" data-queue-more hidden aria-expanded="false">Show more</button>
+        </div>
       </section>
 
       <div class="related-head"><h2>More on YouTube</h2></div>
@@ -1482,6 +1485,8 @@ export function mountRemoteWatch(root, id) {
   // needs its own per-view set (otherwise "Remove" shows a toast but nothing
   // disappears when the queue is empty).
   const hiddenSuggested = new Set();
+  const UP_NEXT_COLLAPSED = 4;
+  let queueExpanded = false;
   let endTimer = null;
   let endNext = null;
   let endVisible = false;
@@ -1701,13 +1706,22 @@ export function mountRemoteWatch(root, id) {
     const list = root.querySelector('[data-queue-list]');
     const empty = root.querySelector('[data-queue-empty]');
     const clear = root.querySelector('[data-queue-clear]');
+    const more = root.querySelector('[data-queue-more]');
     const queue = store.queueList();
     // With no explicit queue, show similar videos as the suggested Up Next.
     const suggested = relatedVideos.filter((v) => v && !hiddenSuggested.has(v.id));
-    const shown = queue.length ? queue : suggested.slice(0, 6);
+    const all = queue.length ? queue : suggested;
+    // Up Next starts collapsed ("show less" by default); Show more reveals all.
+    const collapsed = UP_NEXT_COLLAPSED;
+    const shown = queueExpanded ? all : all.slice(0, collapsed);
     if (list) list.innerHTML = shown.map(queueItemHtml).join('');
     if (empty) empty.hidden = shown.length > 0;
     if (clear) clear.hidden = shown.length === 0;
+    if (more) {
+      more.hidden = all.length <= collapsed;
+      more.textContent = queueExpanded ? 'Show less' : 'Show more';
+      more.setAttribute('aria-expanded', String(queueExpanded));
+    }
     if (store.accountFilter()) topUpAccountQueue();
   };
 
@@ -2229,6 +2243,8 @@ export function mountRemoteWatch(root, id) {
         });
       }
       tracks = dedupeTracks(tracks, seed.title, 20, 1, seed);
+      // The seed song belongs in its own mix, as the first track.
+      tracks = withSeedTrack(tracks, seed);
       if (!tracks.length) {
         toast('Could not build a mix right now. Check your connection.');
         button?.removeAttribute('disabled');
@@ -2280,6 +2296,12 @@ export function mountRemoteWatch(root, id) {
       for (const v of relatedVideos) if (v?.id) hiddenSuggested.add(v.id);
       paintQueue();
       toast('Up Next cleared');
+      return;
+    }
+
+    if (event.target.closest('[data-queue-more]')) {
+      queueExpanded = !queueExpanded;
+      paintQueue();
     }
   };
   root.addEventListener('click', onWatchClick);
