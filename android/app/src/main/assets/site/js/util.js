@@ -38,6 +38,15 @@ export function fmtTime(total) {
   return fmtDuration(total);
 }
 
+/** "3:55" / "1:02:03" -> seconds, for files that only carry a display label. */
+export function parseLength(label) {
+  const parts = String(label || '')
+    .split(':')
+    .map((p) => Number(p.trim()));
+  if (!parts.length || parts.some((n) => !Number.isFinite(n))) return 0;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
+}
+
 const TIME_UNITS = [
   [31536000, 'year'],
   [2592000, 'month'],

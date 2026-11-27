@@ -29,7 +29,8 @@ const MOOD_WORDS = [
   'emotional', 'heartbreak', 'lonely', 'dreamy', 'gentle', 'tender', 'lofi',
   'lo-fi', 'raw', 'bare', 'minimal', 'sparse', 'delicate', 'sweet', 'romantic',
   'hopeful', 'upbeat', 'energetic', 'dark', 'moody', 'soulful', 'raspy',
-  'husky', 'low voice', 'female version', 'male version',
+  'husky', 'low voice', 'soft voice', 'quiet vocals', 'sparse instrumentation',
+  'low energy', 'slow tempo', 'female version', 'male version',
 ];
 
 /* Videos that are collections of many songs, not a single track. */
@@ -149,7 +150,12 @@ function hasArtistToken(text, artistTokens) {
 }
 
 function hasWord(text, word) {
-  return ` ${String(text || '').toLowerCase()} `.includes(` ${word} `);
+  // Punctuation/newlines shouldn't hide a mood: "mellow," "(sad)" "soft\n".
+  const hay = String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ');
+  return ` ${hay} `.includes(` ${word} `);
 }
 
 function hasGenre(text) {
@@ -223,16 +229,20 @@ function isCover(title) {
   return /\b(cover|tribute)\b/i.test(String(title || ''));
 }
 
-/** Small ranking boost for mellow/stripped/lyric-led tracks. */
-const VIBE_WORDS = /\b(acoustic|ballad|mellow|slow|soft|sad|indie|stripped|piano|chill|calm|gentle|lyrics?)\b/i;
-function vibeScore(video) {
-  const matches = String(video?.title || '').match(new RegExp(VIBE_WORDS.source, 'gi'));
-  return Math.min(2, matches ? matches.length : 0);
+/** Rank a candidate by how well its texture matches the SEED's own moods. */
+function vibeScore(video, seedMoods = []) {
+  const text = String(video?.title || '');
+  let score = 0;
+  for (const mood of seedMoods) {
+    if (hasWord(text, mood)) score += 2;
+  }
+  // Generic texture terms are a weaker, secondary signal.
+  const generic = text.match(/\b(acoustic|ballad|mellow|slow|soft|stripped|piano|chill|calm|gentle|instrumental)\b/gi);
+  return score + Math.min(1, generic ? generic.length : 0);
 }
 
 function moodsFrom(text) {
-  const hay = String(text || '').toLowerCase();
-  return MOOD_WORDS.filter((m) => hasWord(hay, m));
+  return MOOD_WORDS.filter((m) => hasWord(text, m));
 }
 
 /** Performing artist identity for a video, used to keep the seed artist out. */
@@ -305,8 +315,9 @@ export function dedupeTracks(videos, seedTitle = '', limit = 12, perArtist = 2, 
     if (!isSingleSong(v)) continue;
     // Keep the mix in the seed's language. A Taylor Swift mix must not drift
     // into Tagalog/OPM uploads just because YouTube's regional search favours
-    // them; a Tagalog seed keeps Tagalog songs.
-    if (languageOf(v) !== seedLanguage) continue;
+    // them; a Tagalog seed keeps Tagalog songs. Mismatches are dropped only
+    // when an explicit marker exists, so unmarked songs are not lost.
+    if (languageOf(v) !== 'english' && languageOf(v) !== seedLanguage) continue;
     const heads = songHeads(v.title);
     if (seedTitle && isSameSong(v.title, seedTitle)) continue;
     if (seedHead && heads.has(seedHead)) continue;
@@ -384,10 +395,13 @@ export async function buildMix(seed, search, { count = 12, topic = '' } = {}) {
   const info = await videoInfo(seed?.id).catch(() => null);
   const keywords = (info?.keywords || []).map((k) => String(k).trim());
   const hint = ARTIST_GENRES[normName(artist)] || ARTIST_GENRES[normName(seed?.channel || '')] || '';
-  const seedText = `${title} ${topic} ${keywords.join(' ')} ${(info?.description || '').slice(0, 500)}`;
+  const seedText = `${title} ${topic} ${keywords.join(' ')} ${(info?.description || '').slice(0, 1200)}`;
   const genres = [...new Set(inferGenres(`${hint} ${seedText}`))].slice(0, 3);
-  let moods = [...new Set(moodsFrom(seedText))].slice(0, 3);
-  if (!moods.length) moods = ['sad', 'indie'];
+  let moods = [...new Set(moodsFrom(seedText))].slice(0, 4);
+  if (!moods.length) {
+    // Neutral texture instead of forcing a sad vibe on an upbeat sparse song.
+    moods = hasWord(seedText, 'quiet') || hasWord(seedText, 'soft') ? ['soft', 'acoustic'] : ['mellow', 'acoustic'];
+  }
 
   const vibe = withoutArtist(topic, artist, seed?.channel);
   const vibeTerms = vibe
@@ -409,25 +423,21 @@ export async function buildMix(seed, search, { count = 12, topic = '' } = {}) {
     if (q && !queries.includes(q)) queries.push(q);
   };
 
-  // Real songs by other artists: mood + genre searches that YouTube answers
-  // with single tracks (lyric videos, official videos) rather than playlists.
-  // Covers are deliberately a small garnish, never the whole queue.
-  for (const genre of genres) {
-    add(`${languageHint} ${genre} songs`);
-    add(`${languageHint} indie ${genre} songs`);
-    add(`${languageHint} ${genre} songs lyric video`);
-  }
-  for (const mood of moods.slice(0, 2)) {
+  // Mood/texture queries are PRIMARY — they are what make a mellow, sparse
+  // seed produce mellow, sparse songs instead of generic chart music.
+  // Generic genre queries are a small secondary pool, never the majority.
+  for (const mood of moods.slice(0, 3)) {
     if (genres.length) add(`${languageHint} ${mood} ${genres[0]} songs`);
-    add(`${languageHint} ${mood} indie songs`);
     add(`${languageHint} ${mood} songs lyric video`);
   }
-  add(`${languageHint} singer songwriter songs`);
-  add(`${languageHint} female indie songs`);
-  add(`${languageHint} acoustic indie songs`);
-  add(`${languageHint} indie pop songs`);
+  if (moods.length >= 2) add(`${languageHint} ${moods[0]} ${moods[1]} songs`);
+  for (const genre of genres.slice(0, 2)) {
+    add(`${languageHint} ${genre} songs lyric video`);
+  }
   for (const term of vibeTerms) add(`${languageHint} ${term} songs`);
-  for (const keyword of cleanKeywords.slice(0, 2)) add(`${keyword} songs`);
+  add(`${languageHint} singer songwriter songs`);
+  add(`${languageHint} acoustic indie songs`);
+  for (const keyword of cleanKeywords.slice(0, 1)) add(`${keyword} songs`);
 
   if (track && languageOf(seed) !== 'english') {
     add(`${track} acoustic cover`);
@@ -444,8 +454,10 @@ export async function buildMix(seed, search, { count = 12, topic = '' } = {}) {
     if (result.status !== 'fulfilled') continue;
     for (const v of (result.value?.videos || [])) pool.push(v);
   }
+  // Rank by how closely each candidate matches the seed's own mood/texture.
   pool.sort(
-    (a, b) => songScore(a) - vibeScore(a) - (songScore(b) - vibeScore(b))
+    (a, b) =>
+      songScore(a) - vibeScore(a, moods) - (songScore(b) - vibeScore(b, moods))
   );
   return dedupeTracks(pool, title, count, 1, seed, Math.max(2, Math.floor(count / 5)));
 }

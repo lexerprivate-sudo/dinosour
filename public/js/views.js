@@ -21,7 +21,7 @@ import {
   shortCardHtml,
   verifiedIcon,
 } from './components.js';
-import { avatarStyle, compact, esc, exact, fmtDuration, initials, shade, shuffleArray, timeAgo, APP_MODE } from './util.js';
+import { avatarStyle, compact, esc, exact, fmtDuration, initials, parseLength, shade, shuffleArray, timeAgo, APP_MODE } from './util.js';
 import { navigate, openMenu, openPrompt, toast } from './ui.js';
 import { searchYouTube, videoInfo } from './yt.js';
 import { buildMix, dedupeTracks, withSeedTrack } from './mix.js';
@@ -1598,7 +1598,9 @@ export function mountRemoteWatch(root, id) {
      the foreground and after a real user/native pause, so it can never fight
      the pause button. */
   const nudgePlayback = () => {
-    if (destroyed || !frame || isAppVisible() || !wantPlaying || pausedByUser) return;
+    // Use real page visibility, not the native bridge flag — on localhost
+    // isAppVisible() is always true so the old guard never let audio continue.
+    if (destroyed || !frame || !isHidden() || !wantPlaying || pausedByUser) return;
     const now = Date.now();
     if (now - lastNudge < 3000 || now - lastAdvance < 3500) return;
     lastNudge = now;
@@ -2043,7 +2045,20 @@ export function mountRemoteWatch(root, id) {
     if (state === 2) save(true);
     else if (state === 0) {
       store.removeResume(id);
-      showEndCard();
+      if (isHidden() && !endSuppressed && !pausedByUser) {
+        // Hidden tabs throttle the end-card countdown to a crawl, so skip it
+        // and advance immediately from the real "ended" event.
+        if (endWatchdog) {
+          clearInterval(endWatchdog);
+          endWatchdog = null;
+        }
+        expectedEndAt = 0;
+        const next = nextUp();
+        if (next) playNext(next);
+        else showEndCard();
+      } else {
+        showEndCard();
+      }
     } else if (state === 1 || state === 3) {
       endSuppressed = false;
     }
@@ -2069,7 +2084,9 @@ export function mountRemoteWatch(root, id) {
     endWatchdog = setInterval(() => {
       if (destroyed || endSuppressed || pausedByUser || !wantPlaying) return;
       if (!expectedEndAt || Date.now() < expectedEndAt) return;
-      if (!isHidden()) return; // foreground relies on the normal end card
+      // The wall clock is authoritative even when the hidden tab throttles
+      // timers and the embed never reports its "ended" event.
+      if (endVisible) return; // foreground end card is already handling it
       if (store.repeatMode() === 'one') {
         replay();
         return;
@@ -2083,9 +2100,19 @@ export function mountRemoteWatch(root, id) {
   const onHide = () => {
     if (document.visibilityState === 'hidden') {
       save(true);
-      if (wantPlaying && !pausedByUser && duration) {
-        expectedEndAt = Date.now() + Math.max(1000, (duration - position) * 1000);
-        armEndWatchdog();
+      if (wantPlaying && !pausedByUser) {
+        // Duration from the embed may be missing in a hidden tab; fall back to
+        // the length shown on the watch page so the end timer still arms.
+        const total = duration || parseLength(meta.length);
+        const left = total ? Math.max(1000, (total - position) * 1000) : 0;
+        if (left) {
+          expectedEndAt = Date.now() + left;
+          armEndWatchdog();
+        }
+        // Keep audio alive in a real background browser tab too.
+        lastNudge = 0;
+        if (!keepAliveTimer) keepAliveTimer = setInterval(nudgePlayback, 2000);
+        if (frame) send({ event: 'command', func: 'playVideo', args: [] });
       }
     } else if (endWatchdog) {
       clearInterval(endWatchdog);
