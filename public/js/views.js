@@ -2008,17 +2008,22 @@ export function mountRemoteWatch(root, id) {
         endWatchdog = null;
       }
     }
-      else if (!isAppVisible()) {
+      else if (isHidden()) {
+        // YouTube auto-paused a hidden embed. Keep wanting playback so the
+        // nudge can restore audio — unless the user explicitly paused.
         if (wantPlaying && !pausedByUser) lastAdvance = 0;
       } else {
-        // Paused in the foreground: remember that the user (or the player)
-        // is not expecting audio, so backgrounding will not restart it.
+        // Paused in the foreground: the user pressed pause in the player.
+        // Latch it, otherwise switching tabs later looks like a fresh chance
+        // to resume and the video starts playing by itself.
+        pausedByUser = true;
         wantPlaying = false;
+        if (endWatchdog) {
+          clearInterval(endWatchdog);
+          endWatchdog = null;
+        }
+        expectedEndAt = 0;
       }
-      // playerState 2 only means "paused right now". It must not be treated as
-      // a new user pause, or the next manual resume gets overridden. A pause
-      // requested from the notification/lock screen is already flagged in
-      // mediaTarget.pause() and is cleared by state 1.
     }
 
     if (state === 2) save(true);
@@ -2150,6 +2155,7 @@ export function mountRemoteWatch(root, id) {
 
   const startPlayback = () => {
     if (!playerEl || playerEl.classList.contains('playing')) return;
+    pausedByUser = false;
     wantPlaying = true;
     lastAdvance = Date.now();
     // In the Android app, the native ExoPlayer surface replaces the embed so
