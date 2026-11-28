@@ -7,9 +7,22 @@ const videoIndex = new Map();
 const channelIndex = new Map();
 
 export async function loadCatalog() {
-  const res = await fetch('/data/catalog.json', { cache: 'no-store' });
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+  let res;
+  try {
+    res = await fetch('/data/catalog.json', { cache: 'no-store', signal: controller?.signal });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`Could not load catalog (${res.status})`);
-  data = await res.json();
+  const next = await res.json();
+  // Keep the previous catalog if a response is malformed, instead of wiping
+  // the indexes and breaking every route.
+  if (!next || !Array.isArray(next.videos) || !Array.isArray(next.channels)) {
+    throw new Error('The catalog file is malformed.');
+  }
+  data = next;
   videoIndex.clear();
   channelIndex.clear();
   for (const c of data.channels) channelIndex.set(c.id, c);

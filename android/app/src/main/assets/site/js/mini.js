@@ -68,10 +68,20 @@ const mediaTarget = {
     closeMini();
   },
   next() {
-    // A dedicated callback avoids forwarding to the same global command that
-    // dispatches straight back into this mini player (infinite recursion).
-    try { window.__dinosourWatchNext?.(); } catch { /* no watch page */ }
+    // The watch page's callback is deleted on navigation, so the mini player
+    // needs its own queue-aware next handler.
+    const list = store.queueList().filter((v) => v && v.id && v.id !== track.id);
+    const alt = list[0] || null;
+    const current = { ...track };
     closeMini();
+    if (alt) {
+      store.removeFromQueue(alt.id);
+      navigate(`/watch/yt/${encodeURIComponent(alt.id)}?autoplay=1`);
+    } else if (window.__dinosourWatchNext) {
+      try { window.__dinosourWatchNext(); } catch {}
+    } else if (current.id) {
+      navigate(`/watch/yt/${encodeURIComponent(current.id)}?autoplay=1`);
+    }
   },
 };
 

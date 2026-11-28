@@ -18,7 +18,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
 
-import androidx.appcompat.app.AppCompatActivity;
+
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
@@ -35,7 +35,9 @@ import java.util.List;
  * interrupting playback (the LibreTube PictureInPictureParamsCompat pattern).
  */
 @UnstableApi
-public class PlayerActivity extends AppCompatActivity {
+// The app theme is a platform theme (not AppCompat); extending AppCompatActivity
+// here threw IllegalStateException and broke PiP entirely.
+public class PlayerActivity extends android.app.Activity {
     public static final String EXTRA_VIDEO_ID = "video_id";
     private static final String ACTION_PLAY = "com.dinosour.app.PIP_PLAY";
     private static final String ACTION_PAUSE = "com.dinosour.app.PIP_PAUSE";

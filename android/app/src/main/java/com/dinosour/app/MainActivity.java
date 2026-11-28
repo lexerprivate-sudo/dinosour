@@ -920,6 +920,10 @@ public class MainActivity extends Activity {
     final MainActivity activity = instance.get();
     if (activity == null) return;
     activity.ui.post(() -> {
+      // Extraction failed: the embed takes over, so PiP must not reopen a
+      // stale native video id.
+      activity.currentVideoId = null;
+      if (activity.playerView != null) activity.playerView.setVisibility(View.GONE);
       if (activity.web == null) return;
       activity.web.evaluateJavascript(
           "window.__dinosourNativeFailed&&window.__dinosourNativeFailed()", null);

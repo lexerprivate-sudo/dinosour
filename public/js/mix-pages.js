@@ -46,7 +46,7 @@ function mixTrackHtml(v, i) {
       </span>
       <span class="mix-track-text">
         <span class="mix-track-title">${esc(v.title)}</span>
-        <span class="mix-track-channel">${esc(v.channel || 'YouTube')}</span>
+        <span class="mix-track-channel">${esc(v.channel || 'YouTube')}${i === 0 ? ' · this song' : ' · similar vibe'}</span>
       </span>
     </a>
     <button type="button" class="mix-add" ${queueAttrs(v)} aria-label="Add to Up Next" title="Add to Up Next">${icon('plus')}</button>

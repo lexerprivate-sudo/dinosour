@@ -746,9 +746,11 @@ function fallbackCopy(text, done) {
   ta.style.opacity = '0';
   document.body.append(ta);
   ta.select();
-  try { document.execCommand('copy'); } catch {}
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch {}
   ta.remove();
-  done();
+  if (copied) done();
+  else toast('Could not copy the link');
 }
 
 /* comments */
@@ -2074,7 +2076,7 @@ export function mountRemoteWatch(root, id) {
 
     // Unavailable/removed/private videos (100/101/150) would otherwise sit on
     // a dead player. Skip to the next queued song if one exists.
-    if ([100, 101, 150].includes(info.error)) {
+    if (Number(info.error) > 0) {
       if (!skippedError) {
         skippedError = true;
         const alt = nextUp();
@@ -3358,7 +3360,7 @@ export async function mountAccount(root, { id, name } = {}) {
     store.clearQueue();
     store.addManyToQueue(videos.slice(1), `account:${id}`);
     paintToggle();
-    navigate(`/watch/yt/${encodeURIComponent(videos[0].id)}?autoplay=1`);
+    navigate(`/watch/yt/${encodeURIComponent(videos[0].id)}?autoplay=1&acct=${encodeURIComponent(id)}`);
   });
 
   root.querySelector('[data-acct-clearqueue]')?.addEventListener('click', () => {
