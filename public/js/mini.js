@@ -67,7 +67,10 @@ const mediaTarget = {
     closeMini();
   },
   next() {
-    try { window.__dinosourMediaCommand?.('next'); } catch { /* no watch page */ }
+    // A dedicated callback avoids forwarding to the same global command that
+    // dispatches straight back into this mini player (infinite recursion).
+    try { window.__dinosourWatchNext?.(); } catch { /* no watch page */ }
+    closeMini();
   },
 };
 
@@ -248,6 +251,9 @@ export function openMini(video) {
   };
   lastSave = 0;
   tries = 0;
+  // A new mini session must not inherit a stale pause from the previous one.
+  pausedByUser = false;
+  pausedAt = 0;
   wantPlaying = true;
   lastAdvance = Date.now();
   lastNudge = 0;

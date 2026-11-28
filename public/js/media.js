@@ -44,6 +44,41 @@ export function reportMedia(playing, title, channel) {
 export function stopMedia() {
   const bridge = api();
   if (bridge && bridge.mediaStop) bridge.mediaStop();
+  if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+    try { navigator.mediaSession.playbackState = 'none'; } catch {}
+  }
+}
+
+/* Web builds (localhost / deployed site) expose OS media keys and lock-screen
+   controls through the Media Session API — NewPipe/LibreTube-style parity. */
+let webSessionBound = false;
+export function setupWebMediaSession(handlers, title, channel, artwork = '') {
+  if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+  const session = navigator.mediaSession;
+  try {
+    const meta = new MediaMetadata({
+      title: title || 'dinosour',
+      artist: channel || 'YouTube',
+      album: 'dinosour',
+      artwork: artwork ? [{ src: artwork, sizes: '512x512', type: 'image/jpeg' }] : [],
+    });
+    session.metadata = meta;
+    const actions = [
+      ['play', handlers.play], ['pause', handlers.pause], ['stop', handlers.stop],
+      ['previoustrack', handlers.prev], ['nexttrack', handlers.next],
+    ];
+    for (const [name, fn] of actions) {
+      if (typeof fn === 'function') {
+        try { session.setActionHandler(name, fn); } catch {}
+      }
+    }
+    webSessionBound = true;
+  } catch {}
+}
+
+export function updateWebMediaState(playing) {
+  if (!webSessionBound || typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+  try { navigator.mediaSession.playbackState = playing ? 'playing' : 'paused'; } catch {}
 }
 
 /* Commands from the native notification / lock screen. */

@@ -56,7 +56,7 @@ const ARTIST_GENRES = {
 /* Language markers. YouTube returns whatever language dominates the user's
  * region for generic queries; these let us keep a mix in the SEED's language
  * instead of drifting into Tagalog/OPM (or any other language) songs. */
-const TAGALOG_RE = /\b(opm|tagalog|pilipino|filipino|pinoy|kundiman|tiktok)\b/i;
+const TAGALOG_RE = /\b(opm|tagalog|pilipino|filipino|pinoy|kundiman)\b/i;
 const LANGUAGE_HINTS = {
   tagalog: TAGALOG_RE,
   spanish: /\b(español|spanish|latina?|latin pop|reggaeton|corrido|bachata)\b/i,
@@ -151,11 +151,12 @@ function hasArtistToken(text, artistTokens) {
 
 function hasWord(text, word) {
   // Punctuation/newlines shouldn't hide a mood: "mellow," "(sad)" "soft\n".
-  const hay = String(text || '')
+  const norm = (s) => String(s || '')
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ');
-  return ` ${hay} `.includes(` ${word} `);
+    .replace(/\s+/g, ' ')
+    .trim();
+  return ` ${norm(text)} `.includes(` ${norm(word)} `);
 }
 
 function hasGenre(text) {

@@ -773,6 +773,7 @@ public class MainActivity extends Activity {
           stopService(new Intent(MainActivity.this, PlayerService.class));
         } catch (Throwable ignored) {
         }
+        currentVideoId = null;
       });
     }
 

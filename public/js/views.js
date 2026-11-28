@@ -25,7 +25,7 @@ import { avatarStyle, compact, esc, exact, fmtDuration, initials, parseLength, s
 import { navigate, openMenu, openPrompt, toast } from './ui.js';
 import { searchYouTube, videoInfo } from './yt.js';
 import { buildMix, dedupeTracks, withSeedTrack } from './mix.js';
-import { clearMediaTarget, isAppVisible, reportMedia, setMediaTarget } from './media.js';
+import { clearMediaTarget, isAppVisible, reportMedia, setMediaTarget, setupWebMediaSession, updateWebMediaState } from './media.js';
 
 const icon = (name, cls = '') =>
   `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
@@ -1534,6 +1534,13 @@ export function mountRemoteWatch(root, id) {
   // keeps playing to the next song even when the video is not on screen.
   let endWatchdog = null;
   let expectedEndAt = 0;
+  // Guard against the ended event and the wall-clock watchdog both firing
+  // for the same transition (LibreTube's isTransitioning pattern).
+  let transitioning = false;
+  // Incremented on an in-place song swap; stale embed messages from the old
+  // video are ignored until its initialDelivery arrives.
+  let playerEpoch = 0;
+  let messageEpoch = 0;
 
   const endCard = playerEl?.querySelector('[data-yt-end]');
   store.pushWatchTrail(id);
@@ -1557,6 +1564,7 @@ export function mountRemoteWatch(root, id) {
     if (next === reportedPlaying) return;
     reportedPlaying = next;
     reportMedia(next, meta.title, meta.channel);
+    updateWebMediaState(next);
   };
 
   const send = (payload) => {
@@ -1620,6 +1628,15 @@ export function mountRemoteWatch(root, id) {
     },
   };
   setMediaTarget(mediaTarget);
+  // Mini-player notification Next calls this dedicated callback.
+  window.__dinosourWatchNext = () => playNext();
+  if (!APP_MODE && typeof navigator !== 'undefined') {
+    setupWebMediaSession(
+      { play: () => mediaTarget.play(), pause: () => mediaTarget.pause(), stop: () => mediaTarget.stop(),
+        prev: () => playPrevious(), next: () => playNext() },
+      meta.title, meta.channel, meta.thumb
+    );
+  }
 
   /* YouTube likes to pause a hidden embed on its own. Retrying playVideo while
      the app is backgrounded keeps audio going, but the retry is disabled in
@@ -1801,7 +1818,9 @@ export function mountRemoteWatch(root, id) {
   };
 
   const playNext = (video = nextUp()) => {
-    if (!video?.id || destroyed) return;
+    if (!video?.id || destroyed || transitioning) return;
+    transitioning = true;
+    setTimeout(() => { transitioning = false; }, 3000);
     hideEndCard();
     store.pushWatchTrail(id);
     store.removeFromQueue(video.id);
@@ -1831,6 +1850,10 @@ export function mountRemoteWatch(root, id) {
       position = 0;
       duration = 0;
       expectedEndAt = 0;
+      lastPlayerState = null;
+      meta.length = video.length || '';
+      endSuppressed = false;
+      playerEpoch += 1;
       pausedByUser = false;
       wantPlaying = true;
       playing = true;
@@ -2026,7 +2049,12 @@ export function mountRemoteWatch(root, id) {
     }
     if (!data || typeof data !== 'object') return;
 
-    if (data.event === 'onReady' || data.event === 'initialDelivery') applyPrefs();
+    if (data.event === 'onReady' || data.event === 'initialDelivery') {
+      messageEpoch = playerEpoch; // the new video's data is now current
+      applyPrefs();
+    }
+    // Ignore stale messages from the previous video after an in-place swap.
+    if (messageEpoch !== playerEpoch) return;
 
     const info = data.info;
     if (!info || typeof info !== 'object') return;
@@ -2114,9 +2142,10 @@ export function mountRemoteWatch(root, id) {
     if (state === 2) save(true);
     else if (state === 0) {
       store.removeResume(id);
-      if (isHidden() && !endSuppressed && !pausedByUser) {
+      if (isHidden() && !endSuppressed && !pausedByUser && store.state.autoplay) {
         // Hidden tabs throttle the end-card countdown to a crawl, so skip it
-        // and advance immediately from the real "ended" event.
+        // and advance immediately from the real "ended" event. Autoplay must
+        // still be on — a user who turned it off must not be overridden.
         if (endWatchdog) {
           clearInterval(endWatchdog);
           endWatchdog = null;
@@ -2152,6 +2181,7 @@ export function mountRemoteWatch(root, id) {
     if (endWatchdog) clearInterval(endWatchdog);
     endWatchdog = setInterval(() => {
       if (destroyed || endSuppressed || pausedByUser || !wantPlaying) return;
+      if (!isHidden() || !store.state.autoplay) return; // foreground uses the end card
       if (!expectedEndAt || Date.now() < expectedEndAt) return;
       // The wall clock is authoritative even when the hidden tab throttles
       // timers and the embed never reports its "ended" event.
@@ -2204,6 +2234,7 @@ export function mountRemoteWatch(root, id) {
     if (window.__dinosourNativeFailed === onNativeFailed) {
       delete window.__dinosourNativeFailed;
     }
+    if (window.__dinosourWatchNext) delete window.__dinosourWatchNext;
     clearTimeout(listenTimer);
     clearTimeout(seekTimer);
     clearInterval(endTimer);

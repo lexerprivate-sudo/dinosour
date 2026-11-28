@@ -121,7 +121,7 @@ public class PlayerActivity extends AppCompatActivity {
                 if (target < 0) target = 0;
                 if (duration > 0 && target > duration) target = duration;
                 controller.seekTo(target);
-                showSeekFeedback(pos > 3000);
+                showSeekFeedback(pos <= 3000);
             } catch (Throwable ignored) {
             }
             return true;
