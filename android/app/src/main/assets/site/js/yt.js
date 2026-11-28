@@ -93,7 +93,9 @@ export async function suggestYouTube(query, { signal } = {}) {
       signal,
     }).catch(() => null);
     const value = Array.isArray(data?.suggestions) ? data.suggestions : [];
-    cacheSet(key, value);
+    // Never cache an empty/failed response — a transient upstream failure
+    // used to poison suggestions for the full TTL.
+    if (value.length) cacheSet(key, value);
     return value;
   });
 }

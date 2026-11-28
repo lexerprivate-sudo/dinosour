@@ -60,6 +60,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * A fully standalone dinosour client: the site is bundled in assets and the
@@ -79,6 +80,8 @@ public class MainActivity extends Activity {
   private static final String KEY_LAST_UPDATE = "last_update_check";
   private static final String KEY_PENDING_VERSION = "pending_version";
   private static final String KEY_SKIPPED_VERSION = "skipped_version";
+
+  private final AtomicBoolean updateCheckInProgress = new AtomicBoolean(false);
 
   private WebView web;
   private PlayerView playerView;
@@ -139,7 +142,7 @@ public class MainActivity extends Activity {
     settings.setJavaScriptCanOpenWindowsAutomatically(false);
     settings.setAllowFileAccess(false);
     settings.setAllowContentAccess(false);
-    settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+    settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     settings.setUserAgentString(settings.getUserAgentString() + " dinosourApp/2.0");
 
     CookieManager cookies = CookieManager.getInstance();
@@ -404,9 +407,12 @@ public class MainActivity extends Activity {
     String path = uri.getPath() == null ? "" : uri.getPath();
 
     if (host.equalsIgnoreCase(HOST)) return false;
-    if (host.endsWith("youtube.com") || host.endsWith("youtube-nocookie.com")) {
-      if (path.startsWith("/embed/")) return false;
-    }
+    // Dot-bounded match: endsWith("youtube.com") also accepted attacker hosts
+    // like "notyoutube.com", which would give them the JS bridge.
+    String lower = host.toLowerCase(java.util.Locale.ROOT);
+    if ((lower.equals("youtube.com") || lower.endsWith(".youtube.com")
+          || lower.equals("youtube-nocookie.com") || lower.endsWith(".youtube-nocookie.com"))
+        && path.startsWith("/embed/")) return false;
     try {
       startActivity(new Intent(Intent.ACTION_VIEW, uri));
     } catch (Exception ignored) {
@@ -432,7 +438,8 @@ public class MainActivity extends Activity {
     final SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
     long last = prefs.getLong(KEY_LAST_UPDATE, 0);
     if (!force && System.currentTimeMillis() - last < UPDATE_INTERVAL) return;
-    prefs.edit().putLong(KEY_LAST_UPDATE, System.currentTimeMillis()).apply();
+    // Don't let an offline/rate-limited check burn the throttle window.
+    if (!updateCheckInProgress.compareAndSet(false, true)) return;
     if (notify) emitUpdate("checking", "Checking for updates…");
 
     io.execute(() -> {
@@ -462,6 +469,8 @@ public class MainActivity extends Activity {
           if (notify) emitUpdate("error", "The update has no APK attached.");
           return;
         }
+        // The check succeeded — only now consume the throttle window.
+        prefs.edit().putLong(KEY_LAST_UPDATE, System.currentTimeMillis()).apply();
 
         final String url = apkUrl;
         final File file = UpdateProvider.apkFile(this);
@@ -491,6 +500,8 @@ public class MainActivity extends Activity {
           ui.post(this::showUpdateError);
         }
         // Otherwise offline or rate limited; try again later.
+      } finally {
+        updateCheckInProgress.set(false);
       }
     });
   }
@@ -735,7 +746,7 @@ public class MainActivity extends Activity {
     /** Native player: start playback of a YouTube video through the ExoPlayer service. */
     @JavascriptInterface
     public void playVideo(final String id) {
-      if (id == null || id.isEmpty()) return;
+      if (id == null || !id.matches("[\\w-]{11}")) return;
       ui.post(() -> {
         try {
           currentVideoId = id;

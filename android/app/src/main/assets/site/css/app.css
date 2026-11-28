@@ -2084,7 +2084,9 @@ body.theater .related { width: min(100% - 48px, 1280px); margin: 24px auto 0; }
   :root { --header-h: 52px; }
   body { overflow-y: auto; -webkit-tap-highlight-color: transparent; }
   .topbar { height: 52px; padding: 0 8px; gap: 4px; border-bottom: 1px solid var(--border-soft); }
-  #menuBtn { display: none; }
+  /* Keep the drawer trigger on phones — sidebar-only pages (Settings, mixes,
+     liked/playlists) are otherwise unreachable in the web build. */
+  #menuBtn { display: inline-flex; width: 36px; height: 36px; }
   .brand { margin-right: 0; padding: 4px 2px; gap: 7px; }
   .brand-name { display: inline; font-size: 18px; letter-spacing: -.6px; }
   .brand-mark { width: 28px; height: 21px; border-radius: 6px; }

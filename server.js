@@ -185,7 +185,8 @@ async function handleApi(req, res, pathname) {
 
       const suggestions = await suggestYouTube(q).catch(() => []);
       const body = { suggestions };
-      cacheSet(key, body, API_TTL.suggest);
+      // Don't cache an empty response from a failed/rate-limited upstream.
+      if (suggestions.length) cacheSet(key, body, API_TTL.suggest);
       return sendJson(res, 200, body);
     }
 

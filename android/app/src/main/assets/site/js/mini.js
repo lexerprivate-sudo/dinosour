@@ -66,6 +66,9 @@ const mediaTarget = {
   stop() {
     closeMini();
   },
+  next() {
+    try { window.__dinosourMediaCommand?.('next'); } catch { /* no watch page */ }
+  },
 };
 
 /* Retry playVideo only while the app is backgrounded and playback is wanted.

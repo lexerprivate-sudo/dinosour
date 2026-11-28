@@ -678,7 +678,7 @@ export function mountWatch(root, video, next) {
         btn.innerHTML = `${icon(now ? 'check' : 'save')} <span data-save-label>${now ? 'Saved' : 'Save'}</span>`;
         toast(now ? 'Saved to Watch later' : 'Removed from Watch later');
       } },
-      ...(/\.m3u8(\?|$)/i.test(video.src)
+      ...(/\.m3u8([?#]|$)/i.test(video.src)
         ? []
         : [{ key: 'download', icon: 'download', label: 'Download', onClick: () => downloadVideo(video) }]),
       { key: 'copy', icon: 'link', label: 'Copy link', onClick: () => copyLink() },
@@ -1027,7 +1027,9 @@ export async function mountResults(root, query, sort = 'relevance') {
       );
     list.innerHTML = shown.length
       ? shown.map(ytResultItemHtml).join('')
-      : '<p class="related-empty">No results left after filters.</p>';
+      : all.length
+        ? '<p class="related-empty">No results left after filters.</p>'
+        : '<p class="related-empty">No YouTube results found.</p>';
     return shown.length;
   };
 
@@ -1583,7 +1585,7 @@ export function mountRemoteWatch(root, id) {
       pausedAt = Date.now();
       playing = false;
       syncMedia(false);
-      if (nativePlaying()) window.Dinosour.pauseVideo?.();
+      if (nativePlaying()) window.Dinosour.stopPlayer?.();
       else send({ event: 'command', func: 'pauseVideo', args: [] });
     },
     next() {

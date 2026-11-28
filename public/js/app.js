@@ -132,7 +132,13 @@ function pruneAppNav() {
   }
 
   const credit = document.querySelector('.sidebar-credit');
-  if (credit) credit.textContent = 'Powered by YouTube';
+  // Keep the required CC-BY attribution visible; append the YouTube note
+  // instead of replacing the licence credit in the app.
+  if (credit) {
+    if (!credit.textContent.includes('Powered by YouTube')) {
+      credit.textContent = `${credit.textContent.trim()} · Powered by YouTube`.trim();
+    }
+  }
 }
 
 function setMini(mini) {
@@ -420,9 +426,11 @@ function legacyCopy(text, done) {
   ta.style.cssText = 'position:fixed;opacity:0';
   document.body.append(ta);
   ta.select();
-  try { document.execCommand('copy'); } catch { /* noop */ }
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch { /* noop */ }
   ta.remove();
-  done();
+  if (copied) done();
+  else toast('Could not copy the link');
 }
 
 document.addEventListener('keydown', (e) => {
@@ -931,7 +939,7 @@ function mountSettings(root) {
         : 'There is no cached data to clear.';
       status.dataset.tone = 'ok';
     }
-    toast('Cache cleared');
+    toast(cleared ? 'Cache cleared' : 'Nothing to clear');
   });
 
   /* Diagnostics: surface the native crash report saved on the device. */
@@ -1237,7 +1245,13 @@ async function boot() {
   view.innerHTML = `${renderChips('All')}
     <div class="skeleton-grid">${Array.from({ length: 8 }).map(() => `<div><div class="skel skel-thumb"></div><div style="display:flex;gap:12px;margin-top:12px"><div class="skel" style="width:36px;height:36px;border-radius:50%"></div><div style="flex:1"><div class="skel skel-line" style="width:92%"></div><div class="skel skel-line" style="width:50%"></div></div></div></div>`).join('')}</div>`;
 
-  await loadCatalog();
+  // A missing/blocked catalog must not brick YouTube search and playback —
+  // those features need no local library.
+  try {
+    await loadCatalog();
+  } catch (err) {
+    console.warn('Local catalog unavailable; continuing with YouTube features.', err);
+  }
   buildSidebar();
   pruneAppNav();
   updateActiveNav([]);
