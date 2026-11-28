@@ -1072,7 +1072,7 @@ export async function mountResults(root, query, sort = 'relevance') {
       paintCount();
 
       if (!shown) {
-        setStatus(`No results for “${query}”.`);
+        setStatus(all.length ? `All results for “${query}” are hidden by your filters.` : `No results for “${query}”.`);
       }
     } catch {
       if (!alive()) return;
@@ -1354,8 +1354,8 @@ export function renderRemoteWatch(id, info = null) {
           <button class="autoplay-toggle" type="button" data-yt-autoplay aria-pressed="${autoplay}">
             <span class="switch ${autoplay ? 'on' : ''}"></span>Autoplay
           </button>
-          <button class="repeat-toggle" type="button" data-yt-repeat title="Repeat mode">${icon('refresh')} <span data-yt-repeat-label>${{ off: 'Off', one: 'One', all: 'All' }[store.repeatMode()]}</span></button>
-          <button class="repeat-toggle" type="button" data-yt-shuffle title="Shuffle the queue" aria-pressed="${store.isShuffle()}">${icon('dots-h')} <span data-yt-shuffle-label>${store.isShuffle() ? 'On' : 'Off'}</span></button>
+          <button class="repeat-toggle ${store.repeatMode() !== 'off' ? 'active' : ''}" type="button" data-yt-repeat title="Repeat mode" aria-pressed="${store.repeatMode() !== 'off'}">${icon('refresh')} <span data-yt-repeat-label>${{ off: 'Off', one: 'One', all: 'All' }[store.repeatMode()]}</span></button>
+          <button class="repeat-toggle ${store.isShuffle() ? 'active' : ''}" type="button" data-yt-shuffle title="Shuffle the queue" aria-pressed="${store.isShuffle()}">${icon('shuffle')} <span data-yt-shuffle-label>${store.isShuffle() ? 'On' : 'Off'}</span></button>
         </div>
         <div class="up-next-list" data-queue-list>${queue.map(queueItemHtml).join('')}</div>
         <p class="up-next-empty" data-queue-empty ${queue.length ? 'hidden' : ''}>Tap ${icon('plus')} on any video to line it up here.</p>
@@ -1437,6 +1437,12 @@ export function mountRemoteWatch(root, id) {
       sleepPauseHandle = null;
     }
   };
+  // The deadline is global so the timer survives navigation/autoplay; each
+  // watch page re-arms its local handles from it on mount.
+  const SLEEP_DEADLINE_KEY = 'dinosour.sleepDeadline';
+  const sleepDeadline = () => {
+    try { return Number(sessionStorage.getItem(SLEEP_DEADLINE_KEY)) || 0; } catch { return 0; }
+  };
   const armSleepTimer = (minutes) => {
     clearSleepTimer();
     store.set('sleepTimer', minutes);
@@ -1445,10 +1451,12 @@ export function mountRemoteWatch(root, id) {
       // Wall-clock deadline: background WebView throttles 1s intervals, but a
       // single timeout still fires at the right time and must do the pausing.
       const deadline = Date.now() + minutes * 60 * 1000;
+      try { sessionStorage.setItem(SLEEP_DEADLINE_KEY, String(deadline)); } catch {}
       const fire = () => {
         clearSleepTimer();
         store.set('sleepTimer', 0);
         refreshSleepLabel();
+        try { sessionStorage.removeItem(SLEEP_DEADLINE_KEY); } catch {}
         try { mediaTarget?.pause?.(); } catch {}
         toast(`Sleep timer: paused after ${minutes} min`);
       };
@@ -1460,6 +1468,7 @@ export function mountRemoteWatch(root, id) {
       }, 1000);
       toast(`Sleep timer set for ${minutes} min`);
     } else {
+      try { sessionStorage.removeItem(SLEEP_DEADLINE_KEY); } catch {}
       toast('Sleep timer off');
     }
   };
@@ -1470,6 +1479,23 @@ export function mountRemoteWatch(root, id) {
     armSleepTimer(next);
   });
   refreshSleepLabel();
+  // Re-arm an in-flight timer after navigation/autoplay.
+  const pendingSleep = sleepDeadline();
+  if (pendingSleep > Date.now()) {
+    store.set('sleepTimer', Math.max(1, Math.ceil((pendingSleep - Date.now()) / 60000)));
+    refreshSleepLabel();
+    const left = pendingSleep - Date.now();
+    sleepPauseHandle = setTimeout(() => {
+      clearSleepTimer();
+      store.set('sleepTimer', 0);
+      refreshSleepLabel();
+      try { sessionStorage.removeItem(SLEEP_DEADLINE_KEY); } catch {}
+      try { mediaTarget?.pause?.(); } catch {}
+      toast('Sleep timer: paused');
+    }, left);
+  } else if (pendingSleep) {
+    try { sessionStorage.removeItem(SLEEP_DEADLINE_KEY); } catch {}
+  }
 
   let frame = null;
   let duration = saved?.d || 0;
@@ -2141,8 +2167,10 @@ export function mountRemoteWatch(root, id) {
     clearTimeout(seekTimer);
     clearInterval(endTimer);
     if (endWatchdog) clearInterval(endWatchdog);
+    // Keep the sleep timer alive across navigation (e.g. autoplay); only the
+    // page's local handles are cleared, the global deadline is re-armed on the
+    // next watch page or by the mini player.
     clearSleepTimer();
-    if (store.state.sleepTimer) store.set('sleepTimer', 0);
     clearInterval(keepAliveTimer);
     root.removeEventListener('click', onWatchClick);
     clearMediaTarget(mediaTarget);
@@ -2347,16 +2375,22 @@ export function mountRemoteWatch(root, id) {
     toast(on ? 'Autoplay on' : 'Autoplay off');
   });
 
-  root.querySelector('[data-yt-repeat]')?.addEventListener('click', () => {
+  root.querySelector('[data-yt-repeat]')?.addEventListener('click', (event) => {
     const mode = store.cycleRepeat();
+    const button = event.currentTarget;
+    button.classList.toggle('active', mode !== 'off');
+    button.setAttribute('aria-pressed', String(mode !== 'off'));
     const label = root.querySelector('[data-yt-repeat-label]');
     if (label) label.textContent = { off: 'Off', one: 'One', all: 'All' }[mode];
     if (endVisible) showEndCard(true);
     toast({ off: 'Repeat off', one: 'Repeat this video', all: 'Repeat the queue' }[mode]);
   });
 
-  root.querySelector('[data-yt-shuffle]')?.addEventListener('click', () => {
+  root.querySelector('[data-yt-shuffle]')?.addEventListener('click', (event) => {
     const on = store.toggleShuffle();
+    const button = event.currentTarget;
+    button.classList.toggle('active', on);
+    button.setAttribute('aria-pressed', String(on));
     const label = root.querySelector('[data-yt-shuffle-label]');
     if (label) label.textContent = on ? 'On' : 'Off';
     toast(on ? 'Shuffle on' : 'Shuffle off');

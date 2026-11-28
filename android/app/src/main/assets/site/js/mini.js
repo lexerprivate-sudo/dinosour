@@ -276,7 +276,9 @@ export function openMini(video) {
       : '';
   frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(
     track.id
-  )}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1${start}${
+  )}?autoplay=1&rel=0&modestbranding=1&playsinline=1&color=white&enablejsapi=1&cc_load_policy=${
+    store.captionsEnabled() ? 1 : 3
+  }${start}${
     APP_MODE ? '' : `&origin=${encodeURIComponent(location.origin)}`
   }`;
 
