@@ -1037,6 +1037,10 @@ const TITLES = {
   mixes: 'Music mixes',
 };
 
+let isPop = false;
+let scrollRestore = 0;
+window.addEventListener('scroll', () => { scrollRestore = window.scrollY; }, { passive: true });
+
 function renderRoute() {
   view.__feedCleanup?.();
   view.__feedCleanup = null;
@@ -1211,7 +1215,16 @@ function renderRoute() {
   }
 
   document.title = title ? `${title} — ${SITE_NAME}` : SITE_NAME;
-  window.scrollTo(0, 0);
+  // Remember the outgoing scroll for this entry, and restore it on Back so
+  // long feeds/lists return to where the user left them.
+  try {
+    if (history.state && typeof history.state === 'object' && !history.state.__dinosourScroll) {
+      history.replaceState({ ...history.state, __dinosourScroll: scrollRestore }, '');
+    }
+  } catch {}
+  const restored = Number(history.state?.__dinosourScroll) || 0;
+  window.scrollTo(0, isPop ? restored : 0);
+  scrollRestore = 0;
   updateActiveNav(seg);
 
   // Keep the video going in the corner when you leave the watch page.
@@ -1243,7 +1256,7 @@ $$('[data-mobile-search]').forEach((btn) => {
   });
 });
 
-window.addEventListener('popstate', renderRoute);
+window.addEventListener('popstate', () => { isPop = true; renderRoute(); isPop = false; });
 window.addEventListener('resize', debounce(() => {
   if (window.innerWidth > 1024) closeDrawer();
 }, 120));

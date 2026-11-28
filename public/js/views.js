@@ -1039,7 +1039,13 @@ export async function mountResults(root, query, sort = 'relevance') {
   const paintCount = () => {
     const parts = [];
     if (localCount) parts.push(`${localCount} from this site`);
-    const shown = all.filter((v) => !store.isFiltered(v)).length;
+    const seen = new Set();
+    let shown = 0;
+    for (const v of all) {
+      if (!v?.id || seen.has(v.id) || store.isFiltered(v)) continue;
+      seen.add(v.id);
+      shown++;
+    }
     if (shown) parts.push(`${shown} from YouTube`);
     sub.textContent = parts.join(' · ');
   };
@@ -2076,7 +2082,7 @@ export function mountRemoteWatch(root, id) {
 
     // Unavailable/removed/private videos (100/101/150) would otherwise sit on
     // a dead player. Skip to the next queued song if one exists.
-    if (Number(info.error) > 0) {
+    if ([2, 5, 100, 101, 150].includes(info.error)) {
       if (!skippedError) {
         skippedError = true;
         const alt = nextUp();
@@ -2403,7 +2409,7 @@ export function mountRemoteWatch(root, id) {
         const fallback = await searchYouTube(String(meta.title || '').split('|')[0].trim());
         return fallback.videos || [];
       });
-      tracks = dedupeTracks(tracks, seed.title, 20, 1, seed, 4);
+      tracks = dedupeTracks(tracks.filter((v) => !store.isFiltered(v)), seed.title, 20, 1, seed, 4);
       // The seed song belongs in its own mix, as the first track.
       tracks = withSeedTrack(tracks, seed);
       if (!tracks.length) {
@@ -2649,7 +2655,14 @@ export function mountRemoteWatch(root, id) {
   // Reached from an end screen: start this video without a second tap.
   if (new URLSearchParams(location.search).get('autoplay') === '1') {
     startPlayback();
-    history.replaceState(history.state, '', location.pathname);
+    try {
+      // Keep account/other query params; only drop the one-shot autoplay flag.
+      const url = new URL(location.href);
+      url.searchParams.delete('autoplay');
+      history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      /* restricted WebView */
+    }
   }
 
   const desc = root.querySelector('[data-desc]');
@@ -2714,8 +2727,9 @@ export function mountRemoteWatch(root, id) {
         { count: 12, topic: searchedTopic }
       );
       if (destroyed || !playerEl?.isConnected) return;
-      // Related videos stay normal — account mode only restricts autoplay.
-      relatedVideos = videos;
+      // Related videos stay normal — account mode only restricts autoplay,
+      // but the user's hidden-channel/keyword filters still apply.
+      relatedVideos = videos.filter((v) => !store.isFiltered(v));
       paintQueue();
       relatedEl.innerHTML = videos.length
         ? videos.map(ytRelItemHtml).join('')

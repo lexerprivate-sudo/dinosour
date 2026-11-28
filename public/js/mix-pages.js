@@ -211,7 +211,7 @@ export function renderMixes() {
           <span class="mix-card-cover"><img src="${esc(m.seed?.thumb || '')}" alt="" loading="lazy" width="320" height="180"></span>
           <span class="mix-card-title">Mix</span>
           <span class="mix-card-sub">Based on ${esc(m.seed?.title || 'your music')}</span>
-          <span class="mix-card-count">${(m.tracks || []).length} songs</span>
+          <span class="mix-card-count">${withSeedTrack(m.tracks || [], m.seed).length} songs</span>
         </a>`).join('')}</div>`
       : emptyState({
           iconName: 'music',

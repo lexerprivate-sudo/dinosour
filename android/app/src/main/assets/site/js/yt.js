@@ -13,7 +13,8 @@ function cacheGet(key) {
     memory.delete(key);
     return null;
   }
-  // Refresh recency so hot entries survive eviction.
+  // Refresh recency so hot entries survive eviction, and refresh the TTL.
+  hit.at = Date.now();
   memory.delete(key);
   memory.set(key, hit);
   return hit.value;

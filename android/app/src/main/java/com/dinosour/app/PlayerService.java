@@ -32,7 +32,13 @@ public class PlayerService extends MediaSessionService {
 
     /** True when the service is already playing this video (PiP must not restart it). */
     public static boolean isPlayingVideo(String id) {
-        return id != null && id.equals(currentVideoId);
+        if (id == null || !id.equals(currentVideoId) || session == null) return false;
+        try {
+            androidx.media3.common.Player p = session.getPlayer();
+            return p.getPlayWhenReady() && p.getPlaybackState() != androidx.media3.common.Player.STATE_IDLE;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private MediaSession session;
@@ -175,6 +181,7 @@ public class PlayerService extends MediaSessionService {
     public void onDestroy() {
         destroyed = true;
         loading = false;
+        currentVideoId = null;
         MediaSession ref = session;
         session = null;
         if (ref != null) {
