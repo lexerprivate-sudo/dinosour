@@ -1817,6 +1817,47 @@ export function mountRemoteWatch(root, id) {
       });
     }
     save(true);
+    if (isHidden()) {
+      // A hidden tab blocks/defer-start of a NEW embed (autoplay=1), so the
+      // queue stalls on a loading spinner until the tab is clicked back.
+      // Load the next song into the ALREADY-PLAYING iframe instead — it keeps
+      // the user activation and continues audio without a page navigation.
+      const nextId = video.id;
+      hideEndCard();
+      id = nextId;
+      meta.title = video.title || meta.title;
+      meta.channel = video.channel || meta.channel;
+      meta.thumb = video.thumb || meta.thumb;
+      position = 0;
+      duration = 0;
+      expectedEndAt = 0;
+      pausedByUser = false;
+      wantPlaying = true;
+      playing = true;
+      lastAdvance = Date.now();
+      const titleEl = root.querySelector('[data-yt-title]');
+      if (titleEl) titleEl.textContent = meta.title;
+      try {
+        if (nativePlaying()) window.Dinosour.playVideo(nextId);
+        else send({ event: 'command', func: 'loadVideoById', args: [nextId] });
+      } catch {
+        // If the in-place swap fails, fall back to a normal navigation.
+        navigate(`/watch/yt/${encodeURIComponent(nextId)}?autoplay=1${accountSuffix()}`);
+        return;
+      }
+      try {
+        history.replaceState(history.state, '', `/watch/yt/${encodeURIComponent(nextId)}${accountSuffix()}`);
+      } catch {
+        /* restricted WebView */
+      }
+      const guess = parseLength(video.length || '');
+      if (guess) {
+        expectedEndAt = Date.now() + guess * 1000;
+        armEndWatchdog();
+      }
+      if (!keepAliveTimer && frame) keepAliveTimer = setInterval(nudgePlayback, 2000);
+      return;
+    }
     navigate(`/watch/yt/${encodeURIComponent(video.id)}?autoplay=1${accountSuffix()}`);
   };
 
