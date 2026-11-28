@@ -41,7 +41,7 @@ public class PlayerService extends MediaSessionService {
         }
     }
 
-    private MediaSession session;
+    private static volatile MediaSession session;
     private volatile boolean destroyed = false;
     private volatile boolean loading = false;
 
