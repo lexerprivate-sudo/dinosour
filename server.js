@@ -137,6 +137,9 @@ function cacheGet(key) {
     apiCache.delete(key);
     return null;
   }
+  // Refresh recency so hot entries survive the 300-entry FIFO cap.
+  apiCache.delete(key);
+  apiCache.set(key, hit);
   return hit.value;
 }
 

@@ -230,15 +230,17 @@ body.mini .sidebar .nav-channel { display: none; }
 }
 body.mini .view { margin-left: var(--mini-w); }
 
+.skip-link { position: absolute; left: -9999px; top: 0; z-index: 1000; padding: 10px 14px; background: var(--accent); color: #fff; border-radius: 0 0 8px 0; }
+.skip-link:focus { left: 0; }
 .scrim {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,.5);
-  z-index: 80;
+  z-index: 130;
 }
 /* The drawer must sit above its scrim, or tapping a nav link closes it
    instead of navigating on tablets/phones. */
-body.drawer .sidebar { z-index: 111; }
+body.drawer .sidebar { z-index: 140; }
 
 .mobile-nav { display: none; }
 .library-tabs { display: none; }

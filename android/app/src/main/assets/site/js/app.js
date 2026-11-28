@@ -173,6 +173,8 @@ let suggestionToken = 0;
 function hideSuggestions() {
   suggestionToken += 1;
   suggestions.hidden = true;
+  searchInput.setAttribute('aria-expanded', 'false');
+  searchInput.removeAttribute('aria-activedescendant');
   activeIndex = -1;
   suggestionRows = [];
 }
@@ -184,18 +186,22 @@ function paintSuggestions(rows) {
   suggestions.innerHTML = rows
     .map(
       (r, i) =>
-        `<button type="button" class="suggestion" data-index="${i}" role="option">
+        `<button type="button" class="suggestion" id="suggestion-${i}" data-index="${i}" role="option" aria-selected="false">
           ${icon(r.icon)}<span class="sug-label">${esc(r.label)}</span><span class="sug-chan">${esc(r.meta)}</span>
         </button>`
     )
     .join('');
   suggestions.hidden = false;
+  searchInput.setAttribute('aria-expanded', 'true');
   // Keep the keyboard highlight across async repaints (e.g. when YouTube
   // suggestions arrive after the local ones) instead of dropping the cursor.
   if (activeIndex >= rows.length) activeIndex = -1;
-  if (activeIndex >= 0) {
-    $$('.suggestion', suggestions).forEach((el, i) => el.classList.toggle('active', i === activeIndex));
-  }
+  $$('.suggestion', suggestions).forEach((el, i) => {
+    const active = i === activeIndex;
+    el.classList.toggle('active', active);
+    el.setAttribute('aria-selected', String(active));
+  });
+  searchInput.setAttribute('aria-activedescendant', activeIndex >= 0 ? `suggestion-${activeIndex}` : '');
 }
 
 function localSuggestionRows(q) {
@@ -327,6 +333,14 @@ suggestions.addEventListener('pointerdown', (e) => {
   if (!row) return;
   e.preventDefault();
   activateSuggestion(Number(row.dataset.index));
+});
+// Tab/Enter on a focused suggestion must work like a pointer click. Pointer
+// clicks are already handled above on pointerdown, so only handle keyboard
+// activation (detail === 0) here to avoid firing twice.
+suggestions.addEventListener('click', (e) => {
+  if (e.detail !== 0) return;
+  const row = e.target.closest('.suggestion');
+  if (row) activateSuggestion(Number(row.dataset.index));
 });
 
 document.addEventListener('pointerdown', (e) => {

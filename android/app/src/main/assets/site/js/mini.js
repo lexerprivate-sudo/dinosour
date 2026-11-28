@@ -21,6 +21,7 @@ let lastAdvance = 0;
 let lastNudge = 0;
 let lastResumeAt = 0;
 let keepAliveTimer = null;
+let sleepTimerHandle = null;
 
 let track = {
   id: '',
@@ -224,6 +225,8 @@ export function closeMini({ savePosition = true } = {}) {
   timer = null;
   clearInterval(keepAliveTimer);
   keepAliveTimer = null;
+  if (sleepTimerHandle) clearTimeout(sleepTimerHandle);
+  sleepTimerHandle = null;
   wantPlaying = false;
   clearMediaTarget(mediaTarget);
   reportedPlaying = false;
@@ -257,6 +260,18 @@ export function openMini(video) {
   wantPlaying = true;
   lastAdvance = Date.now();
   lastNudge = 0;
+  // Honour a sleep timer set on the watch page: pause this mini session too.
+  if (sleepTimerHandle) clearTimeout(sleepTimerHandle);
+  try {
+    const deadline = Number(sessionStorage.getItem('dinosour.sleepDeadline')) || 0;
+    if (deadline > Date.now()) {
+      sleepTimerHandle = setTimeout(() => {
+        mediaTarget.pause();
+        store.set('sleepTimer', 0);
+        try { sessionStorage.removeItem('dinosour.sleepDeadline'); } catch {}
+      }, deadline - Date.now());
+    }
+  } catch {}
 
   miniEl = document.createElement('div');
   miniEl.className = 'mini-player';

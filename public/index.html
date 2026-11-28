@@ -45,6 +45,7 @@
 </script>
 </head>
 <body>
+<a class="skip-link" href="#view">Skip to content</a>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <defs>
     <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
@@ -113,11 +114,11 @@
     <form class="search" id="searchForm" role="search" autocomplete="off">
       <div class="search-box" id="searchBox">
         <svg class="icon search-lead"><use href="#i-search"/></svg>
-        <input id="searchInput" name="q" type="search" placeholder="Search YouTube" aria-label="Search" spellcheck="false">
+        <input id="searchInput" name="q" type="search" placeholder="Search YouTube" aria-label="Search" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions">
         <button type="button" class="search-clear" id="searchClear" aria-label="Clear search" hidden><svg class="icon"><use href="#i-x"/></svg></button>
         <button type="submit" class="search-submit" aria-label="Search"><svg class="icon"><use href="#i-search"/></svg></button>
       </div>
-      <div class="suggestions" id="suggestions" hidden></div>
+      <div class="suggestions" id="suggestions" role="listbox" hidden></div>
     </form>
   </div>
 

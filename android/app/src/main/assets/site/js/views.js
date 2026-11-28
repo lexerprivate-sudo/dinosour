@@ -339,6 +339,7 @@ export async function mountTrending(root, { period, category, sort } = {}) {
       root.querySelectorAll('[data-sort]').forEach((b) => b.classList.toggle('active', b === btn));
       visibleSections().forEach(renderSection);
       store.setTrendingPref({ sort: state.sort });
+      syncUrl();
     });
   });
 
@@ -934,7 +935,7 @@ export function renderResults({ query = '', sort = 'relevance' } = {}) {
     })}</div>`;
   }
 
-  const local = APP_MODE ? searchVideos(q) : [];
+  const local = APP_MODE ? searchVideos(q).filter((v) => !store.isFiltered(v)) : [];
   const chans = APP_MODE ? searchChannels(q) : [];
 
   const chanStrip = chans.length
@@ -1000,7 +1001,7 @@ export async function mountResults(root, query, sort = 'relevance') {
   const sentinel = root.querySelector('[data-yt-sentinel]');
   if (!list || !more || !status) return;
 
-  const localCount = APP_MODE ? searchVideos(query).length : 0;
+  const localCount = APP_MODE ? searchVideos(query).filter((v) => !store.isFiltered(v)).length : 0;
   let continuation = null;
   let busy = false;
   let failed = false;

@@ -220,7 +220,12 @@ const PIPED_INSTANCES = [
 ];
 
 function pipedVideo(item) {
-  const id = (item.url || '').split('v=')[1] || '';
+  let id = '';
+  try {
+    id = new URL(item.url, 'https://youtube.com').searchParams.get('v') || '';
+  } catch {
+    id = (item.url || '').match(/[?&]v=([\w-]{11})/)?.[1] || '';
+  }
   if (!id) return null;
   return {
     id,
