@@ -6,7 +6,9 @@ export async function onRequestGet({ request }) {
   const q = (url.searchParams.get('q') || '').trim().slice(0, 200);
   if (!q) return cachedJson(request, 0, async () => ({ body: { suggestions: [] } }));
 
-  return cachedJson(request, 3600, async () => ({
-    body: { suggestions: await suggestYouTube(q).catch(() => []) },
+  const suggestions = await suggestYouTube(q).catch(() => []);
+  // A transient/failed upstream must not poison the suggestion cache for an hour.
+  return cachedJson(request, suggestions.length ? 3600 : 0, async () => ({
+    body: { suggestions },
   }));
 }

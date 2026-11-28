@@ -260,6 +260,7 @@ export function artistOf(video) {
 export function isSameArtist(video, seed) {
   const names = [artistAndTrack(seed?.title || '').artist, seed?.channel]
     .filter(Boolean)
+    .filter((n) => !/\b(topic|vevo|lyrics?|official|records|music|auto-generated)\b/i.test(n))
     .map(normName)
     .filter((n) => n.length > 2);
   if (!names.length) return false;
@@ -290,8 +291,17 @@ export function isSameArtist(video, seed) {
     if (matches(parts[i])) return true;
   }
   // No dash: "Taylor Swift being the MAIN CHARACTER…" or "…(Artist Lyrics)".
+  // Covers by other artists legitimately mention the seed artist in parentheses.
+  const coverCredit = /\b(cover|tribute|remix|karaoke|version)\b/i.test(title);
   const flat = normName(title);
-  if (names.some((name) => flat.startsWith(name) || (name.length > 3 && flat.includes(name)))) {
+  if (
+    !coverCredit &&
+    names.some(
+      (name) =>
+        (name.length > 3 && flat.startsWith(name)) ||
+        (name.length > 3 && flat.includes(name))
+    )
+  ) {
     return true;
   }
   return false;
@@ -438,7 +448,7 @@ export async function buildMix(seed, search, { count = 12, topic = '' } = {}) {
   for (const term of vibeTerms) add(`${languageHint} ${term} songs`);
   add(`${languageHint} singer songwriter songs`);
   add(`${languageHint} acoustic indie songs`);
-  for (const keyword of cleanKeywords.slice(0, 1)) add(`${keyword} songs`);
+  for (const keyword of cleanKeywords.slice(0, 1)) add(`${languageHint} ${keyword} songs`);
 
   if (track && languageOf(seed) !== 'english') {
     add(`${track} acoustic cover`);

@@ -7,6 +7,7 @@ const LEGACY_KEYS = ['watch.v1', 'tot.v1'];
    a single id was expected. Always reduce ids to a real YouTube id. */
 function cleanId(value) {
   if (Array.isArray(value)) return cleanId(value[0]);
+  if (value && typeof value === 'object') return cleanId(value.id);
   const s = String(value || '');
   const match = s.match(/^[A-Za-z0-9_-]{11}/);
   return match ? match[0] : '';
@@ -648,7 +649,8 @@ export const store = {
   playNextVideo(video, source = '') {
     const id = cleanId(video?.id);
     if (!id) return false;
-    const without = this.queueList().filter((v) => v.id !== id);
+    const without = this.queueList().filter((v) => v.id !== id).slice(0, 29);
+    // Clamp below the cap so the just-inserted entry survives the slice(0,30).
     const cursor = Math.min(Number(this.state.nextCursor) || 0, without.length);
     without.splice(cursor, 0, {
       id,

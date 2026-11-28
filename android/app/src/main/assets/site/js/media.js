@@ -76,9 +76,19 @@ export function setupWebMediaSession(handlers, title, channel, artwork = '') {
   } catch {}
 }
 
-export function updateWebMediaState(playing) {
+export function updateWebMediaState(playing, position = 0, duration = 0) {
   if (!webSessionBound || typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
   try { navigator.mediaSession.playbackState = playing ? 'playing' : 'paused'; } catch {}
+  // Seekbar in the system notification / lock screen.
+  try {
+    if (duration > 0 && 'setPositionState' in navigator.mediaSession) {
+      navigator.mediaSession.setPositionState({
+        duration: Math.max(duration, position + 1),
+        playbackRate: 1,
+        position: Math.min(Math.max(position, 0), duration),
+      });
+    }
+  } catch {}
 }
 
 /* Commands from the native notification / lock screen. */

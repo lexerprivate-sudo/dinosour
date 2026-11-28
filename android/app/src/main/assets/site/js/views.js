@@ -1538,6 +1538,7 @@ export function mountRemoteWatch(root, id) {
   // Guard against the ended event and the wall-clock watchdog both firing
   // for the same transition (LibreTube's isTransitioning pattern).
   let transitioning = false;
+  let skippedError = false;
   // Incremented on an in-place song swap; stale embed messages from the old
   // video are ignored until its initialDelivery arrives.
   let playerEpoch = 0;
@@ -1565,7 +1566,7 @@ export function mountRemoteWatch(root, id) {
     if (next === reportedPlaying) return;
     reportedPlaying = next;
     reportMedia(next, meta.title, meta.channel);
-    updateWebMediaState(next);
+    updateWebMediaState(next, position, duration);
   };
 
   const send = (payload) => {
@@ -1852,9 +1853,15 @@ export function mountRemoteWatch(root, id) {
       duration = 0;
       expectedEndAt = 0;
       lastPlayerState = null;
+      skippedError = false;
       meta.length = video.length || '';
       endSuppressed = false;
       playerEpoch += 1;
+      // The next message from the new video is current immediately: YouTube's
+      // IFrame API does not re-send initialDelivery after loadVideoById.
+      messageEpoch = playerEpoch;
+      reportedPlaying = false;
+      syncMedia(true);
       pausedByUser = false;
       wantPlaying = true;
       playing = true;
@@ -1911,6 +1918,11 @@ export function mountRemoteWatch(root, id) {
   const replay = () => {
     hideEndCard();
     endSuppressed = false;
+    expectedEndAt = 0; // stop repeat-one from re-firing every watchdog tick
+    if (endWatchdog) {
+      clearInterval(endWatchdog);
+      endWatchdog = null;
+    }
     wantPlaying = true;
     lastAdvance = Date.now();
     store.removeResume(id);
@@ -2060,6 +2072,22 @@ export function mountRemoteWatch(root, id) {
     const info = data.info;
     if (!info || typeof info !== 'object') return;
 
+    // Unavailable/removed/private videos (100/101/150) would otherwise sit on
+    // a dead player. Skip to the next queued song if one exists.
+    if ([100, 101, 150].includes(info.error)) {
+      if (!skippedError) {
+        skippedError = true;
+        const alt = nextUp();
+        if (alt && alt.id !== id) {
+          toast('Video unavailable — skipping to the next one.');
+          playNext(alt);
+        } else {
+          toast('This video is unavailable.');
+        }
+      }
+      return;
+    }
+
     if (typeof info.playbackQuality === 'string' && info.playbackQuality !== 'unknown') {
       actualQuality = info.playbackQuality;
     }
@@ -2152,9 +2180,12 @@ export function mountRemoteWatch(root, id) {
           endWatchdog = null;
         }
         expectedEndAt = 0;
-        const next = nextUp();
-        if (next) playNext(next);
-        else showEndCard();
+        if (store.repeatMode() === 'one') replay();
+        else {
+          const next = nextUp();
+          if (next) playNext(next);
+          else showEndCard();
+        }
       } else {
         showEndCard();
       }
@@ -2365,14 +2396,12 @@ export function mountRemoteWatch(root, id) {
       } catch {
         /* storage may be unavailable */
       }
-      let tracks = relatedVideos.length ? relatedVideos : [];
-      if (!tracks.length) {
-        tracks = await buildMix(seed, searchYouTube, { count: 20, topic }).catch(async () => {
-          const fallback = await searchYouTube(String(meta.title || '').split('|')[0].trim());
-          return fallback.videos || [];
-        });
-      }
-      tracks = dedupeTracks(tracks, seed.title, 20, 1, seed);
+      // Always build a fresh 20-track mix; the related rail is only 12 items.
+      const tracks = await buildMix(seed, searchYouTube, { count: 20, topic }).catch(async () => {
+        const fallback = await searchYouTube(String(meta.title || '').split('|')[0].trim());
+        return fallback.videos || [];
+      });
+      tracks = dedupeTracks(tracks, seed.title, 20, 1, seed, 4);
       // The seed song belongs in its own mix, as the first track.
       tracks = withSeedTrack(tracks, seed);
       if (!tracks.length) {

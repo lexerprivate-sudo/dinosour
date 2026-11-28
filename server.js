@@ -105,7 +105,7 @@ function sendFile(req, res, file, stat, { cache, rangeOk }) {
 
   const baseHeaders = {
     'Content-Type': type,
-    'Accept-Ranges': 'bytes',
+    ...(rangeOk ? { 'Accept-Ranges': 'bytes' } : {}),
     'Cache-Control': appShell ? 'no-store' : (cache || 'no-cache'),
     ETag: etag,
     'X-Content-Type-Options': 'nosniff',
